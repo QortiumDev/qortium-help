@@ -1,0 +1,474 @@
+import { qdnRequest } from './qdnRequest';
+import type {
+  DeleteActionResult,
+  PublishActionResult,
+  QdnResource,
+  QdnSelectedAccount,
+} from './types';
+
+export const FEEDBACK_SCHEMA = 'qortium.help.feedback.v1';
+export const FEEDBACK_POST_PREFIX = 'qhelp.feedback.v1.p.';
+export const FEEDBACK_COMMENT_PREFIX = 'qhelp.feedback.v1.c.';
+export const FEEDBACK_TAGS = ['qortium-help', 'feedback', 'v1'];
+const FEEDBACK_SERVICE = 'JSON';
+const FEEDBACK_FILE_NAME = 'feedback.json';
+const MAX_FEEDBACK_RESOURCE_BYTES = 200_000;
+
+export type FeedbackKind = 'idea' | 'issue';
+
+export type FeedbackAttachment = {
+  filename?: string;
+  identifier: string;
+  mimeType?: string;
+  name: string;
+  service: string;
+  sha256?: string;
+  size?: number;
+};
+
+export type FeedbackPostPayload = {
+  attachments: FeedbackAttachment[];
+  body: string;
+  createdAt: number;
+  id: string;
+  kind: 'post';
+  schema: typeof FEEDBACK_SCHEMA;
+  title: string;
+  type: FeedbackKind;
+  updatedAt: number;
+};
+
+export type FeedbackCommentPayload = {
+  attachments: FeedbackAttachment[];
+  body: string;
+  createdAt: number;
+  id: string;
+  kind: 'comment';
+  postId: string;
+  schema: typeof FEEDBACK_SCHEMA;
+  updatedAt: number;
+};
+
+export type FeedbackPayload = FeedbackPostPayload | FeedbackCommentPayload;
+
+export type FeedbackResource<T extends FeedbackPayload = FeedbackPayload> = {
+  created: number;
+  identifier: string;
+  isDeleted?: boolean;
+  ownerName: string;
+  payload: T;
+  resource: QdnResource;
+  updated: number;
+};
+
+export type AccountContext = {
+  account: QdnSelectedAccount | null;
+  writableNames: string[];
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeBody(value: string) {
+  return value.trim().replace(/\r\n/g, '\n');
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+
+  return btoa(binary);
+}
+
+export function jsonToBase64(value: unknown) {
+  return bytesToBase64(new TextEncoder().encode(JSON.stringify(value, null, 2)));
+}
+
+export function createFeedbackId() {
+  const time = Date.now().toString(36).padStart(9, '0');
+  const randomBytes = new Uint8Array(8);
+
+  crypto.getRandomValues(randomBytes);
+
+  const random = Array.from(randomBytes, (byte) => byte.toString(36).padStart(2, '0')).join('');
+
+  return `${time}${random}`;
+}
+
+export function buildPostIdentifier(postId: string) {
+  return `${FEEDBACK_POST_PREFIX}${postId}`;
+}
+
+export function buildCommentIdentifier(postId: string, commentId: string) {
+  return `${FEEDBACK_COMMENT_PREFIX}${postId}.${commentId}`;
+}
+
+export function getPostIdFromIdentifier(identifier: string) {
+  return identifier.startsWith(FEEDBACK_POST_PREFIX) ? identifier.slice(FEEDBACK_POST_PREFIX.length) : null;
+}
+
+export function getCommentPartsFromIdentifier(identifier: string) {
+  if (!identifier.startsWith(FEEDBACK_COMMENT_PREFIX)) {
+    return null;
+  }
+
+  const remainder = identifier.slice(FEEDBACK_COMMENT_PREFIX.length);
+  const separatorIndex = remainder.lastIndexOf('.');
+
+  if (separatorIndex <= 0 || separatorIndex >= remainder.length - 1) {
+    return null;
+  }
+
+  return {
+    commentId: remainder.slice(separatorIndex + 1),
+    postId: remainder.slice(0, separatorIndex),
+  };
+}
+
+function normalizeResource(resource: unknown): QdnResource | null {
+  if (!isRecord(resource)) {
+    return null;
+  }
+
+  const name = getString(resource.name);
+  const service = getString(resource.service);
+  const identifier = getString(resource.identifier);
+
+  if (!name || !service || !identifier) {
+    return null;
+  }
+
+  return {
+    created: getNumber(resource.created) ?? null,
+    identifier,
+    latestSignature: resource.latestSignature,
+    metadata: isRecord(resource.metadata) ? resource.metadata : null,
+    name,
+    service,
+    size: getNumber(resource.size) ?? null,
+    status: isRecord(resource.status) ? resource.status : null,
+    updated: getNumber(resource.updated) ?? null,
+  };
+}
+
+function normalizeResources(value: unknown): QdnResource[] {
+  return Array.isArray(value) ? value.map(normalizeResource).filter((resource): resource is QdnResource => !!resource) : [];
+}
+
+function normalizeAttachment(value: unknown): FeedbackAttachment | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const service = getString(value.service);
+  const name = getString(value.name);
+  const identifier = getString(value.identifier);
+
+  if (!service || !name || !identifier) {
+    return null;
+  }
+
+  return {
+    filename: getString(value.filename) || undefined,
+    identifier,
+    mimeType: getString(value.mimeType) || undefined,
+    name,
+    service,
+    sha256: getString(value.sha256) || undefined,
+    size: getNumber(value.size),
+  };
+}
+
+function normalizeAttachments(value: unknown) {
+  return Array.isArray(value)
+    ? value.map(normalizeAttachment).filter((attachment): attachment is FeedbackAttachment => !!attachment)
+    : [];
+}
+
+function normalizePayload(value: unknown): FeedbackPayload | null {
+  if (!isRecord(value) || value.schema !== FEEDBACK_SCHEMA) {
+    return null;
+  }
+
+  const kind = getString(value.kind);
+  const id = getString(value.id);
+  const body = normalizeBody(getString(value.body));
+  const createdAt = getNumber(value.createdAt) ?? 0;
+  const updatedAt = getNumber(value.updatedAt) ?? createdAt;
+
+  if (!id || !body || !createdAt) {
+    return null;
+  }
+
+  if (kind === 'post') {
+    const title = getString(value.title);
+    const type = getString(value.type);
+
+    if (!title || (type !== 'issue' && type !== 'idea')) {
+      return null;
+    }
+
+    return {
+      attachments: normalizeAttachments(value.attachments),
+      body,
+      createdAt,
+      id,
+      kind: 'post',
+      schema: FEEDBACK_SCHEMA,
+      title,
+      type,
+      updatedAt,
+    };
+  }
+
+  if (kind === 'comment') {
+    const postId = getString(value.postId);
+
+    if (!postId) {
+      return null;
+    }
+
+    return {
+      attachments: normalizeAttachments(value.attachments),
+      body,
+      createdAt,
+      id,
+      kind: 'comment',
+      postId,
+      schema: FEEDBACK_SCHEMA,
+      updatedAt,
+    };
+  }
+
+  return null;
+}
+
+function parseQdnJson(value: unknown) {
+  if (typeof value === 'string') {
+    return JSON.parse(value) as unknown;
+  }
+
+  return value;
+}
+
+async function fetchPayload(resource: QdnResource) {
+  const value = await qdnRequest<unknown>({
+    action: 'FETCH_QDN_RESOURCE',
+    identifier: resource.identifier ?? undefined,
+    maxBytes: MAX_FEEDBACK_RESOURCE_BYTES,
+    name: resource.name,
+    service: resource.service,
+  });
+
+  return normalizePayload(parseQdnJson(value));
+}
+
+async function fetchFeedbackResource<T extends FeedbackPayload>(
+  resource: QdnResource,
+  expectedKind: T['kind'],
+): Promise<FeedbackResource<T> | null> {
+  try {
+    const payload = await fetchPayload(resource);
+
+    if (!payload || payload.kind !== expectedKind || !resource.identifier) {
+      return null;
+    }
+
+    return {
+      created: resource.created ?? payload.createdAt,
+      identifier: resource.identifier,
+      ownerName: resource.name,
+      payload: payload as T,
+      resource,
+      updated: resource.updated ?? payload.updatedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function searchFeedbackResources(identifierPrefix: string, limit: number) {
+  const resources = await qdnRequest<unknown>({
+    action: 'SEARCH_QDN_RESOURCES',
+    identifier: identifierPrefix,
+    includeMetadata: true,
+    includeStatus: true,
+    limit,
+    mode: 'ALL',
+    prefix: true,
+    reverse: true,
+    service: FEEDBACK_SERVICE,
+  });
+
+  return normalizeResources(resources);
+}
+
+export async function loadFeedback(limit = 120) {
+  const [postResources, commentResources] = await Promise.all([
+    searchFeedbackResources(FEEDBACK_POST_PREFIX, limit),
+    searchFeedbackResources(FEEDBACK_COMMENT_PREFIX, limit * 2),
+  ]);
+
+  const [posts, comments] = await Promise.all([
+    Promise.all(postResources.map((resource) => fetchFeedbackResource<FeedbackPostPayload>(resource, 'post'))),
+    Promise.all(commentResources.map((resource) => fetchFeedbackResource<FeedbackCommentPayload>(resource, 'comment'))),
+  ]);
+
+  return {
+    comments: comments
+      .filter((comment): comment is FeedbackResource<FeedbackCommentPayload> => !!comment)
+      .sort((a, b) => b.created - a.created),
+    posts: posts
+      .filter((post): post is FeedbackResource<FeedbackPostPayload> => !!post)
+      .sort((a, b) => b.updated - a.updated),
+  };
+}
+
+function normalizeNames(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (typeof item === 'string') {
+        return item.trim();
+      }
+
+      if (isRecord(item)) {
+        return getString(item.name);
+      }
+
+      return '';
+    })
+    .filter(Boolean);
+}
+
+export async function loadAccountContext(): Promise<AccountContext> {
+  const account = await qdnRequest<QdnSelectedAccount>({ action: 'GET_SELECTED_ACCOUNT' });
+  const nameSet = new Set<string>();
+
+  if (account?.name) {
+    nameSet.add(account.name);
+  }
+
+  if (account?.address) {
+    try {
+      const names = await qdnRequest<unknown>({ action: 'GET_ACCOUNT_NAMES', address: account.address });
+
+      for (const name of normalizeNames(names)) {
+        nameSet.add(name);
+      }
+    } catch {
+      // The selected account name is enough for the first publish path.
+    }
+  }
+
+  return {
+    account,
+    writableNames: [...nameSet].sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+export function unlockSelectedAccount() {
+  return qdnRequest<QdnSelectedAccount>({ action: 'UNLOCK_SELECTED_ACCOUNT' });
+}
+
+export function canOwnResource(resource: FeedbackResource, writableNames: string[]) {
+  return writableNames.some((name) => name.toLowerCase() === resource.ownerName.toLowerCase());
+}
+
+export function createPostPayload(type: FeedbackKind, title: string, body: string): FeedbackPostPayload {
+  const id = createFeedbackId();
+  const now = Date.now();
+
+  return {
+    attachments: [],
+    body: normalizeBody(body),
+    createdAt: now,
+    id,
+    kind: 'post',
+    schema: FEEDBACK_SCHEMA,
+    title: title.trim(),
+    type,
+    updatedAt: now,
+  };
+}
+
+export function createCommentPayload(postId: string, body: string): FeedbackCommentPayload {
+  const id = createFeedbackId();
+  const now = Date.now();
+
+  return {
+    attachments: [],
+    body: normalizeBody(body),
+    createdAt: now,
+    id,
+    kind: 'comment',
+    postId,
+    schema: FEEDBACK_SCHEMA,
+    updatedAt: now,
+  };
+}
+
+export function updatePostPayload(
+  payload: FeedbackPostPayload,
+  patch: Pick<FeedbackPostPayload, 'body' | 'title' | 'type'>,
+): FeedbackPostPayload {
+  return {
+    ...payload,
+    body: normalizeBody(patch.body),
+    title: patch.title.trim(),
+    type: patch.type,
+    updatedAt: Date.now(),
+  };
+}
+
+export function updateCommentPayload(payload: FeedbackCommentPayload, body: string): FeedbackCommentPayload {
+  return {
+    ...payload,
+    body: normalizeBody(body),
+    updatedAt: Date.now(),
+  };
+}
+
+export async function publishFeedbackPayload(name: string, payload: FeedbackPayload): Promise<PublishActionResult> {
+  const title = payload.kind === 'post' ? payload.title : `Reply ${payload.postId}`;
+  const description = payload.body.slice(0, 240);
+  const identifier =
+    payload.kind === 'post' ? buildPostIdentifier(payload.id) : buildCommentIdentifier(payload.postId, payload.id);
+
+  return qdnRequest<PublishActionResult>({
+    action: 'PUBLISH_QDN_RESOURCE',
+    base64: jsonToBase64(payload),
+    description,
+    filename: FEEDBACK_FILE_NAME,
+    identifier,
+    name,
+    service: FEEDBACK_SERVICE,
+    tags: [...FEEDBACK_TAGS, payload.kind, payload.kind === 'post' ? payload.type : 'reply'].slice(0, 5),
+    title,
+  });
+}
+
+export async function deleteFeedbackResource(resource: FeedbackResource): Promise<DeleteActionResult> {
+  return qdnRequest<DeleteActionResult>({
+    action: 'DELETE_QDN_RESOURCE',
+    identifier: resource.identifier,
+    name: resource.ownerName,
+    service: FEEDBACK_SERVICE,
+  });
+}

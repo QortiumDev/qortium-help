@@ -1,6 +1,6 @@
 # Qortium Help
 
-A QDN app for Qortium Home community feedback. The first milestone supports JSON-backed issues, ideas, replies, edits, and deletes through Home's QDN bridge.
+A QDN app for Qortium Home community feedback. Supports JSON-backed issues, ideas, replies, edits, deletes, and marking a post complete through Home's QDN bridge. Post and comment bodies can contain `qdn://`, `home://`, and `core://` links, which open in a new Qortium Home tab.
 
 ## Development
 
@@ -38,7 +38,7 @@ Feedback resources use the `JSON` service:
 
 ```text
 qhelp.feedback.v1.p.<postId>
-qhelp.feedback.v1.c.<postId>.<commentId>
+qhelp.feedback.v1.c.<commentId>
 ```
 
-Posts and comments use schema `qortium.help.feedback.v1`. Attachments are reserved for a later milestone and should be linked as separate QDN resources from the JSON payload.
+Posts and comments use schema `qortium.help.feedback.v1`. The comment identifier embeds only the comment id (the parent post id lives in the JSON payload) to keep identifiers within the 64-byte QDN limit. Posts carry a `status` of `open` or `done`. Attachments are reserved for a later milestone and should be linked as separate QDN resources from the JSON payload.

@@ -1,13 +1,17 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  ArrowLeft,
   CheckCircle2,
+  Circle,
   Edit3,
   Lightbulb,
+  ListFilter,
   MessageSquare,
   Plus,
   RefreshCw,
   Reply,
+  RotateCcw,
   Save,
   Send,
   Trash2,
@@ -15,6 +19,7 @@ import {
 } from 'lucide-react';
 import { createTranslator } from './i18n';
 import { applyDisplaySettings, getDisplaySettingsUpdateFromMessage, getInitialDisplaySettings } from './displaySettings';
+import { renderFeedbackText } from './feedbackLinks';
 import { getBridgeState, hasAction } from './qdnRequest';
 import {
   canOwnResource,
@@ -24,6 +29,7 @@ import {
   loadAccountContext,
   loadFeedback,
   publishFeedbackPayload,
+  setPostStatusPayload,
   unlockSelectedAccount,
   updateCommentPayload,
   updatePostPayload,
@@ -36,7 +42,8 @@ import {
 import type { BridgeState } from './types';
 
 type LoadState = 'error' | 'loading' | 'ready';
-type FeedFilter = 'all' | 'idea' | 'issue' | 'orphan';
+type FeedFilter = 'all' | 'completed' | 'idea' | 'issue' | 'open' | 'orphan';
+type MainView = 'compose' | 'detail' | 'list';
 
 type FeedbackData = {
   comments: FeedbackResource<FeedbackCommentPayload>[];
@@ -53,6 +60,8 @@ const emptyBridgeState: BridgeState = {
   isHomeBridge: false,
   ui: 'BROWSER_DEV',
 };
+
+const FILTERS: FeedFilter[] = ['all', 'open', 'completed', 'issue', 'idea', 'orphan'];
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -167,12 +176,14 @@ function CommandButton({
 
 function PostComposer({
   canPublish,
+  onCancel,
   onSubmit,
   publishName,
   publishing,
   t,
 }: {
   canPublish: boolean;
+  onCancel: () => void;
   onSubmit: (type: FeedbackKind, title: string, body: string) => Promise<boolean>;
   publishName: string;
   publishing: boolean;
@@ -200,33 +211,37 @@ function PostComposer({
 
   return (
     <form className="composer" onSubmit={handleSubmit}>
-      <div className="composer__header">
-        <span className="section-title">{t('action.new')}</span>
-        <div className="segmented" role="group">
-          <button
-            aria-pressed={type === 'issue'}
-            className={type === 'issue' ? 'is-selected' : ''}
-            onClick={() => setType('issue')}
-            type="button"
-          >
-            <AlertCircle aria-hidden="true" />
-            <span>{t('kind.issue')}</span>
-          </button>
-          <button
-            aria-pressed={type === 'idea'}
-            className={type === 'idea' ? 'is-selected' : ''}
-            onClick={() => setType('idea')}
-            type="button"
-          >
-            <Lightbulb aria-hidden="true" />
-            <span>{t('kind.idea')}</span>
-          </button>
-        </div>
+      <div className="panel-bar">
+        <IconButton label={t('action.back')} onClick={onCancel}>
+          <ArrowLeft aria-hidden="true" />
+        </IconButton>
+        <span className="section-title">{t('action.newPost')}</span>
+      </div>
+      <div className="segmented" role="group">
+        <button
+          aria-pressed={type === 'issue'}
+          className={type === 'issue' ? 'is-selected' : ''}
+          onClick={() => setType('issue')}
+          type="button"
+        >
+          <AlertCircle aria-hidden="true" />
+          <span>{t('kind.issue')}</span>
+        </button>
+        <button
+          aria-pressed={type === 'idea'}
+          className={type === 'idea' ? 'is-selected' : ''}
+          onClick={() => setType('idea')}
+          type="button"
+        >
+          <Lightbulb aria-hidden="true" />
+          <span>{t('kind.idea')}</span>
+        </button>
       </div>
       <label>
         <span>{t('field.title')}</span>
         <input
           autoComplete="off"
+          autoFocus
           disabled={!canPublish || publishing}
           maxLength={120}
           onChange={(event) => setTitle(event.target.value)}
@@ -239,50 +254,58 @@ function PostComposer({
           disabled={!canPublish || publishing}
           maxLength={12000}
           onChange={(event) => setBody(event.target.value)}
-          rows={5}
+          rows={8}
           value={body}
         />
       </label>
       <div className="composer__footer">
         <span className="publish-name">{publishName || t('status.noName')}</span>
-        <CommandButton
-          disabled={!canPublish || publishing || !title.trim() || !body.trim()}
-          icon={<Send aria-hidden="true" />}
-          type="submit"
-          variant="primary"
-        >
-          {publishing ? t('label.loading') : t('action.post')}
-        </CommandButton>
+        <div className="button-row button-row--end">
+          <CommandButton disabled={publishing} icon={<X aria-hidden="true" />} onClick={onCancel}>
+            {t('action.cancel')}
+          </CommandButton>
+          <CommandButton
+            disabled={!canPublish || publishing || !title.trim() || !body.trim()}
+            icon={<Send aria-hidden="true" />}
+            type="submit"
+            variant="primary"
+          >
+            {publishing ? t('label.loading') : t('action.post')}
+          </CommandButton>
+        </div>
       </div>
     </form>
   );
 }
 
 function FeedItem({
-  active,
   commentCount,
   onSelect,
   post,
   t,
 }: {
-  active: boolean;
   commentCount: number;
   onSelect: () => void;
   post: FeedbackResource<FeedbackPostPayload>;
   t: ReturnType<typeof createTranslator>;
 }) {
   const edited = post.payload.updatedAt > post.payload.createdAt;
+  const completed = post.payload.status === 'done';
 
   return (
-    <button className={`feed-item ${active ? 'is-active' : ''}`} onClick={onSelect} type="button">
+    <button className={`feed-item ${completed ? 'is-completed' : ''}`} onClick={onSelect} type="button">
       <span className={`kind-mark kind-mark--${post.payload.type}`}>
         <IconForKind type={post.payload.type} />
       </span>
       <span className="feed-item__body">
-        <span className="feed-item__title">{post.payload.title}</span>
+        <span className="feed-item__title">
+          {completed ? <CheckCircle2 aria-hidden="true" className="feed-item__done" /> : null}
+          <span className="feed-item__title-text">{post.payload.title}</span>
+        </span>
         <span className="feed-item__meta">
           {getDisplayName(post.ownerName)} · {formatRelativeTime(post.updated)}
           {edited ? ` · ${t('label.edited')}` : ''}
+          {completed ? ` · ${t('status.completed')}` : ''}
         </span>
       </span>
       <span className="reply-count">
@@ -344,7 +367,7 @@ function CommentView({
           </div>
         </div>
       ) : (
-        <p>{comment.payload.body}</p>
+        <p>{renderFeedbackText(comment.payload.body)}</p>
       )}
       {canEdit && !editing ? (
         <div className="item-actions">
@@ -422,6 +445,7 @@ export default function App() {
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FeedFilter>('all');
+  const [view, setView] = useState<MainView>('list');
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [publishName, setPublishName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -491,7 +515,7 @@ export default function App() {
           return current;
         }
 
-        return nextData.posts[0]?.payload.id ?? null;
+        return null;
       });
     } catch (error) {
       setLoadState('error');
@@ -533,15 +557,89 @@ export default function App() {
     () => data.comments.filter((comment) => !postIds.has(comment.payload.postId)),
     [data.comments, postIds],
   );
-  const filteredPosts = useMemo(() => {
-    if (filter === 'idea' || filter === 'issue') {
-      return data.posts.filter((post) => post.payload.type === filter);
+
+  const filterCounts = useMemo(() => {
+    const counts: Record<FeedFilter, number> = {
+      all: data.posts.length,
+      completed: 0,
+      idea: 0,
+      issue: 0,
+      open: 0,
+      orphan: orphanComments.length,
+    };
+
+    for (const post of data.posts) {
+      if (post.payload.status === 'done') {
+        counts.completed += 1;
+      } else {
+        counts.open += 1;
+      }
+
+      if (post.payload.type === 'issue') {
+        counts.issue += 1;
+      } else {
+        counts.idea += 1;
+      }
     }
 
-    return data.posts;
+    return counts;
+  }, [data.posts, orphanComments.length]);
+
+  const filteredPosts = useMemo(() => {
+    switch (filter) {
+      case 'completed':
+        return data.posts.filter((post) => post.payload.status === 'done');
+      case 'idea':
+      case 'issue':
+        return data.posts.filter((post) => post.payload.type === filter);
+      case 'open':
+        return data.posts.filter((post) => post.payload.status !== 'done');
+      default:
+        return data.posts;
+    }
   }, [data.posts, filter]);
+
   const selectedPost = data.posts.find((post) => post.payload.id === selectedPostId) ?? null;
   const selectedComments = selectedPost ? commentsByPostId.get(selectedPost.payload.id) ?? [] : [];
+
+  function getFilterLabel(value: FeedFilter) {
+    switch (value) {
+      case 'all':
+        return t('filter.all');
+      case 'completed':
+        return t('filter.completed');
+      case 'idea':
+        return t('filter.idea');
+      case 'issue':
+        return t('filter.issue');
+      case 'open':
+        return t('filter.open');
+      default:
+        return t('filter.orphan');
+    }
+  }
+
+  function openComposer() {
+    setLoadError(null);
+    setView('compose');
+  }
+
+  function openDetail(postId: string) {
+    setSelectedPostId(postId);
+    setView('detail');
+  }
+
+  function backToList() {
+    cancelPostEdit();
+    setCommentEditId(null);
+    setCommentEditBody('');
+    setView('list');
+  }
+
+  function selectFilter(value: FeedFilter) {
+    setFilter(value);
+    setView('list');
+  }
 
   async function ensureSelectedAccountUnlocked() {
     if (!accountLocked) {
@@ -598,7 +696,13 @@ export default function App() {
   }
 
   async function handleCreatePost(type: FeedbackKind, title: string, body: string) {
-    return publishAndRefresh(createPostPayload(type, title, body));
+    const success = await publishAndRefresh(createPostPayload(type, title, body));
+
+    if (success) {
+      setView('detail');
+    }
+
+    return success;
   }
 
   async function handleCreateComment(body: string) {
@@ -607,6 +711,12 @@ export default function App() {
     }
 
     return publishAndRefresh(createCommentPayload(selectedPost.payload.id, body));
+  }
+
+  async function handleToggleStatus(post: FeedbackResource<FeedbackPostPayload>) {
+    const nextStatus = post.payload.status === 'done' ? 'open' : 'done';
+
+    await publishAndRefresh(setPostStatusPayload(post.payload, nextStatus), post.ownerName);
   }
 
   function startPostEdit(post: FeedbackResource<FeedbackPostPayload>) {
@@ -673,6 +783,7 @@ export default function App() {
       await refreshFeedback();
       if (resource.payload.kind === 'post') {
         setSelectedPostId(null);
+        setView('list');
       }
     } catch (error) {
       setLoadError(getErrorMessage(error, t('error.delete')));
@@ -680,6 +791,8 @@ export default function App() {
       setBusy(false);
     }
   }
+
+  const showList = view === 'list' || (view === 'detail' && !selectedPost);
 
   return (
     <main className="app-shell">
@@ -708,6 +821,10 @@ export default function App() {
 
       <section className="workspace">
         <aside className="sidebar">
+          <CommandButton disabled={busy} icon={<Plus aria-hidden="true" />} onClick={openComposer} variant="primary">
+            {t('action.newPost')}
+          </CommandButton>
+
           <div className="account-strip">
             <label>
               <span>{t('field.name')}</span>
@@ -729,84 +846,65 @@ export default function App() {
             </label>
           </div>
 
-          <PostComposer canPublish={canPublish} onSubmit={handleCreatePost} publishName={publishName} publishing={busy} t={t} />
-
-          <div className="feed-toolbar">
-            <span className="section-title">{t('label.feedback')}</span>
-            <div className="segmented segmented--compact" role="group">
-              {(['all', 'issue', 'idea', 'orphan'] as const).map((value) => (
-                <button
-                  aria-pressed={filter === value}
-                  className={filter === value ? 'is-selected' : ''}
-                  key={value}
-                  onClick={() => setFilter(value)}
-                  type="button"
-                >
-                  {value === 'all'
-                    ? t('filter.all')
-                    : value === 'issue'
-                      ? t('filter.issue')
-                      : value === 'idea'
-                        ? t('filter.idea')
-                        : t('filter.orphan')}
-                </button>
-              ))}
+          <nav className="filter-nav" aria-label={t('label.filters')}>
+            <div className="filter-nav__title">
+              <ListFilter aria-hidden="true" />
+              <span className="section-title">{t('label.filters')}</span>
             </div>
-          </div>
+            {FILTERS.map((value) => (
+              <button
+                aria-pressed={filter === value}
+                className={`filter-nav__item ${filter === value ? 'is-selected' : ''}`}
+                key={value}
+                onClick={() => selectFilter(value)}
+                type="button"
+              >
+                <span>{getFilterLabel(value)}</span>
+                <span className="count-pill">{filterCounts[value]}</span>
+              </button>
+            ))}
+          </nav>
 
-          {loadError ? <div className="notice notice--error">{loadError}</div> : null}
           {accountError ? <div className="notice">{accountError}</div> : null}
-
-          <div className="feed-list">
-            {loadState === 'loading' ? <EmptyState text={t('label.loading')} /> : null}
-            {loadState !== 'loading' && filter !== 'orphan' && filteredPosts.length === 0 ? (
-              <EmptyState text={t('empty.posts')} />
-            ) : null}
-            {filter !== 'orphan'
-              ? filteredPosts.map((post) => (
-                  <FeedItem
-                    active={post.payload.id === selectedPostId}
-                    commentCount={commentsByPostId.get(post.payload.id)?.length ?? 0}
-                    key={post.identifier}
-                    onSelect={() => setSelectedPostId(post.payload.id)}
-                    post={post}
-                    t={t}
-                  />
-                ))
-              : null}
-            {filter === 'orphan' && orphanComments.length === 0 ? <EmptyState text={t('empty.orphans')} /> : null}
-            {filter === 'orphan'
-              ? orphanComments.map((comment) => (
-                  <button className="feed-item feed-item--orphan" key={comment.identifier} type="button">
-                    <span className="kind-mark kind-mark--orphan">
-                      <MessageSquare aria-hidden="true" />
-                    </span>
-                    <span className="feed-item__body">
-                      <span className="feed-item__title">{t('label.deletedPost')}</span>
-                      <span className="feed-item__meta">
-                        {getDisplayName(comment.ownerName)} · {formatRelativeTime(comment.updated)}
-                      </span>
-                    </span>
-                  </button>
-                ))
-              : null}
-          </div>
         </aside>
 
-        <section className="detail">
-          {!selectedPost ? (
-            <EmptyState text={filter === 'orphan' ? t('empty.orphans') : t('label.select')} />
-          ) : (
-            <>
+        <section className="main-panel">
+          {loadError ? <div className="notice notice--error">{loadError}</div> : null}
+
+          {view === 'compose' ? (
+            <PostComposer
+              canPublish={canPublish}
+              onCancel={backToList}
+              onSubmit={handleCreatePost}
+              publishName={publishName}
+              publishing={busy}
+              t={t}
+            />
+          ) : null}
+
+          {view === 'detail' && selectedPost ? (
+            <div className="detail">
+              <div className="panel-bar">
+                <IconButton label={t('action.back')} onClick={backToList}>
+                  <ArrowLeft aria-hidden="true" />
+                </IconButton>
+                <span className="section-title">{t('label.feedback')}</span>
+              </div>
+
               <article className="post-detail">
                 <div className="post-detail__header">
                   <span className={`kind-mark kind-mark--${selectedPost.payload.type}`}>
                     <IconForKind type={selectedPost.payload.type} />
                   </span>
                   <div>
-                    <span className="post-detail__kind">
-                      {selectedPost.payload.type === 'issue' ? t('kind.issue') : t('kind.idea')}
-                    </span>
+                    <div className="post-detail__tags">
+                      <span className="post-detail__kind">
+                        {selectedPost.payload.type === 'issue' ? t('kind.issue') : t('kind.idea')}
+                      </span>
+                      <StatusPill tone={selectedPost.payload.status === 'done' ? 'good' : 'neutral'}>
+                        {selectedPost.payload.status === 'done' ? t('status.completed') : t('status.open')}
+                      </StatusPill>
+                    </div>
                     <h2>{selectedPost.payload.title}</h2>
                     <div className="post-detail__meta">
                       <span>{getDisplayName(selectedPost.ownerName)}</span>
@@ -816,6 +914,18 @@ export default function App() {
                   </div>
                   {canPublishResource && canOwnResource(selectedPost, accountContext.writableNames) ? (
                     <div className="item-actions">
+                      <IconButton
+                        disabled={busy}
+                        label={selectedPost.payload.status === 'done' ? t('action.reopen') : t('action.complete')}
+                        onClick={() => void handleToggleStatus(selectedPost)}
+                        variant={selectedPost.payload.status === 'done' ? 'ghost' : 'primary'}
+                      >
+                        {selectedPost.payload.status === 'done' ? (
+                          <RotateCcw aria-hidden="true" />
+                        ) : (
+                          <CheckCircle2 aria-hidden="true" />
+                        )}
+                      </IconButton>
                       <IconButton label={t('action.edit')} onClick={() => startPostEdit(selectedPost)}>
                         <Edit3 aria-hidden="true" />
                       </IconButton>
@@ -876,7 +986,7 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <p className="post-body">{selectedPost.payload.body}</p>
+                  <p className="post-body">{renderFeedbackText(selectedPost.payload.body)}</p>
                 )}
               </article>
 
@@ -909,8 +1019,52 @@ export default function App() {
                   ))}
                 </div>
               </section>
-            </>
-          )}
+            </div>
+          ) : null}
+
+          {showList ? (
+            <div className="list-view">
+              <div className="list-view__head">
+                <h2 className="list-view__title">{getFilterLabel(filter)}</h2>
+                <CommandButton disabled={busy} icon={<Plus aria-hidden="true" />} onClick={openComposer} variant="primary">
+                  {t('action.newPost')}
+                </CommandButton>
+              </div>
+              <div className="feed-list">
+                {loadState === 'loading' ? <EmptyState text={t('label.loading')} /> : null}
+                {loadState !== 'loading' && filter !== 'orphan' && filteredPosts.length === 0 ? (
+                  <EmptyState text={t('empty.posts')} />
+                ) : null}
+                {filter !== 'orphan'
+                  ? filteredPosts.map((post) => (
+                      <FeedItem
+                        commentCount={commentsByPostId.get(post.payload.id)?.length ?? 0}
+                        key={post.identifier}
+                        onSelect={() => openDetail(post.payload.id)}
+                        post={post}
+                        t={t}
+                      />
+                    ))
+                  : null}
+                {filter === 'orphan' && orphanComments.length === 0 ? <EmptyState text={t('empty.orphans')} /> : null}
+                {filter === 'orphan'
+                  ? orphanComments.map((comment) => (
+                      <div className="feed-item feed-item--orphan" key={comment.identifier}>
+                        <span className="kind-mark kind-mark--orphan">
+                          <Circle aria-hidden="true" />
+                        </span>
+                        <span className="feed-item__body">
+                          <span className="feed-item__title">{t('label.deletedPost')}</span>
+                          <span className="feed-item__meta">
+                            {getDisplayName(comment.ownerName)} · {formatRelativeTime(comment.updated)}
+                          </span>
+                        </span>
+                      </div>
+                    ))
+                  : null}
+              </div>
+            </div>
+          ) : null}
         </section>
       </section>
 

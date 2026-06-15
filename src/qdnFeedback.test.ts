@@ -3,8 +3,9 @@ import {
   FEEDBACK_SCHEMA,
   buildCommentIdentifier,
   buildPostIdentifier,
-  getCommentPartsFromIdentifier,
+  getCommentIdFromIdentifier,
   getPostIdFromIdentifier,
+  setPostStatusPayload,
   updateCommentPayload,
   updatePostPayload,
   type FeedbackCommentPayload,
@@ -15,20 +16,28 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const MAX_IDENTIFIER_LENGTH = 64;
+
 describe('feedback identifiers', () => {
   it('builds and parses post identifiers', () => {
     expect(buildPostIdentifier('post123')).toBe('qhelp.feedback.v1.p.post123');
     expect(getPostIdFromIdentifier('qhelp.feedback.v1.p.post123')).toBe('post123');
-    expect(getPostIdFromIdentifier('qhelp.feedback.v1.c.post123.comment456')).toBeNull();
+    expect(getPostIdFromIdentifier('qhelp.feedback.v1.c.comment456')).toBeNull();
   });
 
   it('builds and parses comment identifiers', () => {
-    expect(buildCommentIdentifier('post123', 'comment456')).toBe('qhelp.feedback.v1.c.post123.comment456');
-    expect(getCommentPartsFromIdentifier('qhelp.feedback.v1.c.post123.comment456')).toEqual({
-      commentId: 'comment456',
-      postId: 'post123',
-    });
-    expect(getCommentPartsFromIdentifier('qhelp.feedback.v1.p.post123')).toBeNull();
+    expect(buildCommentIdentifier('comment456')).toBe('qhelp.feedback.v1.c.comment456');
+    expect(getCommentIdFromIdentifier('qhelp.feedback.v1.c.comment456')).toBe('comment456');
+    expect(getCommentIdFromIdentifier('qhelp.feedback.v1.p.post123')).toBeNull();
+  });
+
+  it('keeps comment identifiers within the QDN identifier byte limit', () => {
+    // A realistic worst case: a fresh comment on a legacy post that still used a
+    // long random id. The comment identifier embeds only its own id, so it stays
+    // well under the limit (the old "post.comment" scheme overflowed it -> API 127).
+    const longCommentId = 'k1abcd'.padEnd(24, 'z');
+
+    expect(buildCommentIdentifier(longCommentId).length).toBeLessThanOrEqual(MAX_IDENTIFIER_LENGTH);
   });
 });
 
@@ -44,6 +53,7 @@ describe('feedback updates', () => {
       id: 'post123',
       kind: 'post',
       schema: FEEDBACK_SCHEMA,
+      status: 'open',
       title: 'Old',
       type: 'issue',
       updatedAt: 1_000,
@@ -55,6 +65,30 @@ describe('feedback updates', () => {
       title: 'New',
       type: 'idea',
       updatedAt: 2_000,
+    });
+  });
+
+  it('marks a post complete while preserving its other fields', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(5_000);
+
+    const post: FeedbackPostPayload = {
+      attachments: [],
+      body: 'body',
+      createdAt: 1_000,
+      id: 'post123',
+      kind: 'post',
+      schema: FEEDBACK_SCHEMA,
+      status: 'open',
+      title: 'Title',
+      type: 'issue',
+      updatedAt: 1_000,
+    };
+
+    expect(setPostStatusPayload(post, 'done')).toEqual({
+      ...post,
+      status: 'done',
+      updatedAt: 5_000,
     });
   });
 

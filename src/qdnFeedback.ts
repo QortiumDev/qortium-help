@@ -15,6 +15,7 @@ const FEEDBACK_FILE_NAME = 'feedback.json';
 const MAX_FEEDBACK_RESOURCE_BYTES = 200_000;
 
 export type FeedbackKind = 'idea' | 'issue';
+export type FeedbackStatus = 'done' | 'open';
 
 export type FeedbackAttachment = {
   filename?: string;
@@ -33,6 +34,7 @@ export type FeedbackPostPayload = {
   id: string;
   kind: 'post';
   schema: typeof FEEDBACK_SCHEMA;
+  status: FeedbackStatus;
   title: string;
   type: FeedbackKind;
   updatedAt: number;
@@ -98,8 +100,10 @@ export function jsonToBase64(value: unknown) {
 }
 
 export function createFeedbackId() {
-  const time = Date.now().toString(36).padStart(9, '0');
-  const randomBytes = new Uint8Array(8);
+  // Keep ids short: QDN arbitrary-transaction identifiers are capped at 64 bytes
+  // (ArbitraryTransaction.MAX_IDENTIFIER_LENGTH), and the prefix already uses 20.
+  const time = Date.now().toString(36);
+  const randomBytes = new Uint8Array(5);
 
   crypto.getRandomValues(randomBytes);
 
@@ -112,30 +116,20 @@ export function buildPostIdentifier(postId: string) {
   return `${FEEDBACK_POST_PREFIX}${postId}`;
 }
 
-export function buildCommentIdentifier(postId: string, commentId: string) {
-  return `${FEEDBACK_COMMENT_PREFIX}${postId}.${commentId}`;
+// The comment identifier intentionally embeds only the comment id. The parent
+// post id lives in the payload, so keeping it out of the identifier keeps us
+// comfortably under the 64-byte identifier limit (older schemes that embedded
+// both ids overflowed it and failed to transform with API error 127).
+export function buildCommentIdentifier(commentId: string) {
+  return `${FEEDBACK_COMMENT_PREFIX}${commentId}`;
 }
 
 export function getPostIdFromIdentifier(identifier: string) {
   return identifier.startsWith(FEEDBACK_POST_PREFIX) ? identifier.slice(FEEDBACK_POST_PREFIX.length) : null;
 }
 
-export function getCommentPartsFromIdentifier(identifier: string) {
-  if (!identifier.startsWith(FEEDBACK_COMMENT_PREFIX)) {
-    return null;
-  }
-
-  const remainder = identifier.slice(FEEDBACK_COMMENT_PREFIX.length);
-  const separatorIndex = remainder.lastIndexOf('.');
-
-  if (separatorIndex <= 0 || separatorIndex >= remainder.length - 1) {
-    return null;
-  }
-
-  return {
-    commentId: remainder.slice(separatorIndex + 1),
-    postId: remainder.slice(0, separatorIndex),
-  };
+export function getCommentIdFromIdentifier(identifier: string) {
+  return identifier.startsWith(FEEDBACK_COMMENT_PREFIX) ? identifier.slice(FEEDBACK_COMMENT_PREFIX.length) : null;
 }
 
 function normalizeResource(resource: unknown): QdnResource | null {
@@ -216,6 +210,7 @@ function normalizePayload(value: unknown): FeedbackPayload | null {
   if (kind === 'post') {
     const title = getString(value.title);
     const type = getString(value.type);
+    const status = getString(value.status) === 'done' ? 'done' : 'open';
 
     if (!title || (type !== 'issue' && type !== 'idea')) {
       return null;
@@ -228,6 +223,7 @@ function normalizePayload(value: unknown): FeedbackPayload | null {
       id,
       kind: 'post',
       schema: FEEDBACK_SCHEMA,
+      status,
       title,
       type,
       updatedAt,
@@ -402,6 +398,7 @@ export function createPostPayload(type: FeedbackKind, title: string, body: strin
     id,
     kind: 'post',
     schema: FEEDBACK_SCHEMA,
+    status: 'open',
     title: title.trim(),
     type,
     updatedAt: now,
@@ -437,6 +434,14 @@ export function updatePostPayload(
   };
 }
 
+export function setPostStatusPayload(payload: FeedbackPostPayload, status: FeedbackStatus): FeedbackPostPayload {
+  return {
+    ...payload,
+    status,
+    updatedAt: Date.now(),
+  };
+}
+
 export function updateCommentPayload(payload: FeedbackCommentPayload, body: string): FeedbackCommentPayload {
   return {
     ...payload,
@@ -446,10 +451,13 @@ export function updateCommentPayload(payload: FeedbackCommentPayload, body: stri
 }
 
 export async function publishFeedbackPayload(name: string, payload: FeedbackPayload): Promise<PublishActionResult> {
-  const title = payload.kind === 'post' ? payload.title : `Reply ${payload.postId}`;
+  // Qortium metadata caps the title at 80 bytes and the description at 240
+  // (ArbitraryDataTransactionMetadata). Core silently truncates, but cap here for
+  // consistency with the description cap below; the full title stays in the payload.
+  const title = (payload.kind === 'post' ? payload.title : `Reply ${payload.postId}`).slice(0, 80);
   const description = payload.body.slice(0, 240);
   const identifier =
-    payload.kind === 'post' ? buildPostIdentifier(payload.id) : buildCommentIdentifier(payload.postId, payload.id);
+    payload.kind === 'post' ? buildPostIdentifier(payload.id) : buildCommentIdentifier(payload.id);
 
   return qdnRequest<PublishActionResult>({
     action: 'PUBLISH_QDN_RESOURCE',

@@ -42,3 +42,13 @@ qhelp.feedback.v1.c.<commentId>
 ```
 
 Posts and comments use schema `qortium.help.feedback.v1`. The comment identifier embeds only the comment id (the parent post id lives in the JSON payload) to keep identifiers within the 64-byte QDN limit. Posts carry a `status` of `open` or `done`. Attachments are reserved for a later milestone and should be linked as separate QDN resources from the JSON payload.
+
+## Direct links
+
+The **Copy link** button on an open item copies a shareable address of the form:
+
+```text
+qdn://APP/Help/Help?post=<postId>
+```
+
+Opening that address in Qortium Home loads the app and jumps straight to the item. Home preserves the `post` query param into the app's render URL, which the app reads on load (`deepLink.ts`). Because the link is a `qdn://` address it is also clickable when pasted into any post or comment body.

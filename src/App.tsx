@@ -4,8 +4,10 @@ import {
   ArrowLeft,
   CheckCircle2,
   Circle,
+  Check,
   Edit3,
   Lightbulb,
+  Link as LinkIcon,
   ListFilter,
   MessageSquare,
   Plus,
@@ -18,6 +20,8 @@ import {
   X,
 } from 'lucide-react';
 import { createTranslator } from './i18n';
+import { copyTextToClipboard } from './clipboard';
+import { buildPostLink, getInitialPostId } from './deepLink';
 import { applyDisplaySettings, getDisplaySettingsUpdateFromMessage, getInitialDisplaySettings } from './displaySettings';
 import { renderFeedbackText } from './feedbackLinks';
 import { getBridgeState, hasAction } from './qdnRequest';
@@ -455,6 +459,8 @@ export default function App() {
   const [postEditBody, setPostEditBody] = useState('');
   const [commentEditId, setCommentEditId] = useState<string | null>(null);
   const [commentEditBody, setCommentEditBody] = useState('');
+  const [pendingPostId, setPendingPostId] = useState<string | null>(() => getInitialPostId());
+  const [copied, setCopied] = useState(false);
 
   const t = useMemo(() => createTranslator(displaySettings.language), [displaySettings.language]);
   const accountLocked = accountContext.account?.isUnlocked === false;
@@ -534,6 +540,21 @@ export default function App() {
     void refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Resolve a `?post=<id>` deep link once the feed has loaded: open that item if
+  // it exists, then drop the pending id so later refreshes don't hijack the view.
+  useEffect(() => {
+    if (!pendingPostId || loadState !== 'ready') {
+      return;
+    }
+
+    if (data.posts.some((post) => post.payload.id === pendingPostId)) {
+      setSelectedPostId(pendingPostId);
+      setView('detail');
+    }
+
+    setPendingPostId(null);
+  }, [pendingPostId, loadState, data.posts]);
 
   const commentsByPostId = useMemo(() => {
     const map = new Map<string, FeedbackResource<FeedbackCommentPayload>[]>();
@@ -719,6 +740,17 @@ export default function App() {
     await publishAndRefresh(setPostStatusPayload(post.payload, nextStatus), post.ownerName);
   }
 
+  async function handleCopyLink(post: FeedbackResource<FeedbackPostPayload>) {
+    const copiedOk = await copyTextToClipboard(buildPostLink(post.payload.id));
+
+    if (copiedOk) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } else {
+      setLoadError(buildPostLink(post.payload.id));
+    }
+  }
+
   function startPostEdit(post: FeedbackResource<FeedbackPostPayload>) {
     setPostEditId(post.payload.id);
     setPostEditType(post.payload.type);
@@ -889,6 +921,14 @@ export default function App() {
                   <ArrowLeft aria-hidden="true" />
                 </IconButton>
                 <span className="section-title">{t('label.feedback')}</span>
+                <div className="panel-bar__end">
+                  <CommandButton
+                    icon={copied ? <Check aria-hidden="true" /> : <LinkIcon aria-hidden="true" />}
+                    onClick={() => void handleCopyLink(selectedPost)}
+                  >
+                    {copied ? t('status.copied') : t('action.copyLink')}
+                  </CommandButton>
+                </div>
               </div>
 
               <article className="post-detail">

@@ -421,7 +421,12 @@ svg {
 .panel-bar {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+}
+
+.panel-bar__end {
+  margin-inline-start: auto;
 }
 
 .filter-nav {

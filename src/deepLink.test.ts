@@ -3,30 +3,45 @@ import { buildPostLink, getAppBaseAddress, getInitialPostId } from './deepLink';
 
 describe('deep links', () => {
   it('reads the post id from the render query string', () => {
-    expect(getInitialPostId('?identifier=Help&post=abc123&theme=dark')).toBe('abc123');
+    expect(getInitialPostId('?post=abc123&theme=dark')).toBe('abc123');
     expect(getInitialPostId('?theme=dark')).toBeNull();
     expect(getInitialPostId('')).toBeNull();
     expect(getInitialPostId('?post=%20')).toBeNull();
   });
 
-  it('derives the app address from the Home render location', () => {
+  it('prefers the identity Core injects as page globals', () => {
     expect(
-      getAppBaseAddress({ pathname: '/render/APP/Help', search: '?identifier=Help&theme=dark' }),
-    ).toBe('qdn://APP/Help/Help');
+      getAppBaseAddress(
+        { pathname: '/render/APP/Help/Help' },
+        { _qdnService: 'APP', _qdnName: 'Operator', _qdnIdentifier: 'qhelp.mirror.v1' },
+      ),
+    ).toBe('qdn://APP/Operator/qhelp.mirror.v1');
+  });
+
+  it('derives the app address from the path-segment render location', () => {
+    expect(getAppBaseAddress({ pathname: '/render/APP/Help/Help', search: '?theme=dark' }, {})).toBe(
+      'qdn://APP/Help/Help',
+    );
+  });
+
+  it('reads the identifier from the third path segment', () => {
+    expect(getAppBaseAddress({ pathname: '/render/APP/Operator/qhelp.mirror.v1/index.html' }, {})).toBe(
+      'qdn://APP/Operator/qhelp.mirror.v1',
+    );
   });
 
   it('falls back to the published identity outside the render host', () => {
-    expect(getAppBaseAddress({ pathname: '/', search: '' })).toBe('qdn://APP/Help/Help');
+    expect(getAppBaseAddress({ pathname: '/', search: '' }, {})).toBe('qdn://APP/Help/Help');
   });
 
   it('builds a shareable post link', () => {
-    expect(buildPostLink('abc123', { pathname: '/render/APP/Help', search: '?identifier=Help' })).toBe(
+    expect(buildPostLink('abc123', { pathname: '/render/APP/Help/Help' }, {})).toBe(
       'qdn://APP/Help/Help?post=abc123',
     );
   });
 
   it('round-trips a built link back to its post id', () => {
-    const link = buildPostLink('xyz-789', { pathname: '/render/APP/Help', search: '?identifier=Help' });
+    const link = buildPostLink('xyz-789', { pathname: '/render/APP/Help/Help' }, {});
     const query = link.slice(link.indexOf('?'));
 
     expect(getInitialPostId(query)).toBe('xyz-789');

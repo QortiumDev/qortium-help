@@ -19,6 +19,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import helpIconUrl from './assets/qortium-help-protoicon-black-transparent.png';
 import { createTranslator } from './i18n';
 import { copyTextToClipboard } from './clipboard';
 import { buildPostLink, getInitialPostId } from './deepLink';
@@ -44,6 +45,12 @@ import {
   type FeedbackResource,
 } from './qdnFeedback';
 import type { BridgeState } from './types';
+
+type QdnRenderWindow = Window &
+  typeof globalThis & {
+    _qdnContext?: unknown;
+    _qdnIdentifier?: unknown;
+  };
 
 type LoadState = 'error' | 'loading' | 'ready';
 type FeedFilter = 'all' | 'completed' | 'idea' | 'issue' | 'open' | 'orphan';
@@ -116,6 +123,34 @@ function isSelectedAccountChangedMessage(value: unknown) {
 
 function IconForKind({ type }: { type: FeedbackKind }) {
   return type === 'issue' ? <AlertCircle aria-hidden="true" /> : <Lightbulb aria-hidden="true" />;
+}
+
+function getQdnAssetUrl(assetUrl: string) {
+  if (typeof window === 'undefined') {
+    return assetUrl;
+  }
+
+  const qdnWindow = window as QdnRenderWindow;
+
+  if (qdnWindow._qdnContext !== 'render' && !window.location.pathname.includes('/render/')) {
+    return assetUrl;
+  }
+
+  const identifier =
+    new URLSearchParams(window.location.search).get('identifier') ??
+    (typeof qdnWindow._qdnIdentifier === 'string' ? qdnWindow._qdnIdentifier : '');
+
+  if (!identifier) {
+    return assetUrl;
+  }
+
+  const url = new URL(assetUrl, window.location.href);
+
+  if (!url.searchParams.has('identifier')) {
+    url.searchParams.set('identifier', identifier);
+  }
+
+  return url.toString();
 }
 
 function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: 'good' | 'neutral' | 'warn' }) {
@@ -824,14 +859,15 @@ export default function App() {
     }
   }
 
+  const helpIconSrc = getQdnAssetUrl(helpIconUrl);
   const showList = view === 'list' || (view === 'detail' && !selectedPost);
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <span className="brand__mark">
-            <MessageSquare aria-hidden="true" />
+          <span className="brand__mark" aria-hidden="true">
+            <img alt="" src={helpIconSrc} />
           </span>
           <div>
             <h1>{t('app.title')}</h1>

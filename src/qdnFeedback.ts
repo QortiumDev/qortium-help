@@ -353,21 +353,43 @@ function normalizeNames(value: unknown) {
     .filter(Boolean);
 }
 
+function appendWritableName(names: string[], seenNames: Set<string>, value: unknown) {
+  const name = getString(value);
+
+  if (!name) {
+    return;
+  }
+
+  const key = name.toLowerCase();
+
+  if (seenNames.has(key)) {
+    return;
+  }
+
+  seenNames.add(key);
+  names.push(name);
+}
+
+export function buildWritableNames(primaryName: unknown, accountNames: unknown) {
+  const names: string[] = [];
+  const seenNames = new Set<string>();
+
+  appendWritableName(names, seenNames, primaryName);
+
+  for (const name of normalizeNames(accountNames)) {
+    appendWritableName(names, seenNames, name);
+  }
+
+  return names;
+}
+
 export async function loadAccountContext(): Promise<AccountContext> {
   const account = await qdnRequest<QdnSelectedAccount>({ action: 'GET_SELECTED_ACCOUNT' });
-  const nameSet = new Set<string>();
-
-  if (account?.name) {
-    nameSet.add(account.name);
-  }
+  let accountNames: unknown = [];
 
   if (account?.address) {
     try {
-      const names = await qdnRequest<unknown>({ action: 'GET_ACCOUNT_NAMES', address: account.address });
-
-      for (const name of normalizeNames(names)) {
-        nameSet.add(name);
-      }
+      accountNames = await qdnRequest<unknown>({ action: 'GET_ACCOUNT_NAMES', address: account.address });
     } catch {
       // The selected account name is enough for the first publish path.
     }
@@ -375,7 +397,7 @@ export async function loadAccountContext(): Promise<AccountContext> {
 
   return {
     account,
-    writableNames: [...nameSet].sort((a, b) => a.localeCompare(b)),
+    writableNames: buildWritableNames(account?.name, accountNames),
   };
 }
 

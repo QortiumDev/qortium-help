@@ -3,6 +3,7 @@ import {
   FEEDBACK_SCHEMA,
   buildCommentIdentifier,
   buildPostIdentifier,
+  buildWritableNames,
   getCommentIdFromIdentifier,
   getPostIdFromIdentifier,
   setPostStatusPayload,
@@ -112,5 +113,35 @@ describe('feedback updates', () => {
       body: 'new',
       updatedAt: 3_000,
     });
+  });
+});
+
+describe('writable name ordering', () => {
+  it('puts the primary name first and preserves API order for the remaining names', () => {
+    expect(
+      buildWritableNames('PrimaryName', [
+        { name: 'zeta' },
+        { name: 'alpha' },
+        { name: 'middle' },
+      ]),
+    ).toEqual(['PrimaryName', 'zeta', 'alpha', 'middle']);
+  });
+
+  it('deduplicates the primary name without re-sorting API names', () => {
+    expect(
+      buildWritableNames('primary', [
+        { name: 'older' },
+        { name: 'Primary' },
+        { name: 'newer' },
+      ]),
+    ).toEqual(['primary', 'older', 'newer']);
+  });
+
+  it('uses API order when there is no primary name', () => {
+    expect(buildWritableNames('', ['bravo', 'alpha', { name: 'charlie' }])).toEqual([
+      'bravo',
+      'alpha',
+      'charlie',
+    ]);
   });
 });

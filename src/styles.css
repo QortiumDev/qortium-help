@@ -335,11 +335,16 @@ svg {
   background: var(--qh-accent-soft);
   border: 1px solid var(--qh-accent-ring);
   border-radius: var(--qh-radius);
-  color: var(--qh-accent);
   display: inline-flex;
   height: 42px;
   justify-content: center;
   width: 42px;
+}
+
+.brand__mark img {
+  display: block;
+  height: 34px;
+  width: 34px;
 }
 
 .brand h1 {

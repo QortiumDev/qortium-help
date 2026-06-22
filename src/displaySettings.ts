@@ -1,4 +1,5 @@
 import { isRtlLanguage, normalizeLanguage as normalizeSupportedLanguage, type SupportedLanguage } from './i18n';
+import type { FeedbackKind } from './qdnFeedback';
 
 export const TEXT_SIZE_VALUES = ['extra-small', 'small', 'medium', 'large', 'extra-large', 'huge'] as const;
 export const ACCENT_OPTIONS = ['green', 'blue', 'orange', 'purple', 'red', 'teal', 'cyan', 'pink', 'yellow'] as const;
@@ -82,6 +83,20 @@ export function getInitialDisplaySettings(): QdnDisplaySettings {
       DEFAULT_DISPLAY_SETTINGS.textSize,
     theme: normalizeTheme(query?.get('theme') ?? hostWindow?._qdnTheme) ?? DEFAULT_DISPLAY_SETTINGS.theme,
   };
+}
+
+export type DeepLinkParams = {
+  app: string | null;
+  type: FeedbackKind | null;
+};
+
+export function getInitialDeepLinkParams(): DeepLinkParams {
+  const query = typeof window === 'undefined' ? null : new URLSearchParams(window.location?.search ?? '');
+  const rawApp = query?.get('app')?.trim() || null;
+  const rawType = query?.get('type');
+  const type: FeedbackKind | null = rawType === 'issue' || rawType === 'idea' ? rawType : null;
+
+  return { app: rawApp, type };
 }
 
 export function applyDisplaySettings(settings: QdnDisplaySettings) {

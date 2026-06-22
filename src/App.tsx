@@ -14,7 +14,12 @@ import {
   X,
 } from 'lucide-react';
 import { createTranslator } from './i18n';
-import { applyDisplaySettings, getDisplaySettingsUpdateFromMessage, getInitialDisplaySettings } from './displaySettings';
+import {
+  applyDisplaySettings,
+  getDisplaySettingsUpdateFromMessage,
+  getInitialDeepLinkParams,
+  getInitialDisplaySettings,
+} from './displaySettings';
 import { getBridgeState, hasAction } from './qdnRequest';
 import {
   canOwnResource,
@@ -23,6 +28,7 @@ import {
   deleteFeedbackResource,
   loadAccountContext,
   loadFeedback,
+  loadPublishedAppNames,
   publishFeedbackPayload,
   unlockSelectedAccount,
   updateCommentPayload,
@@ -36,7 +42,7 @@ import {
 import type { BridgeState } from './types';
 
 type LoadState = 'error' | 'loading' | 'ready';
-type FeedFilter = 'all' | 'idea' | 'issue' | 'orphan';
+type FeedFilter = 'all' | 'idea' | 'issue' | 'myApps' | 'orphan';
 
 type FeedbackData = {
   comments: FeedbackResource<FeedbackCommentPayload>[];
@@ -53,6 +59,8 @@ const emptyBridgeState: BridgeState = {
   isHomeBridge: false,
   ui: 'BROWSER_DEV',
 };
+
+const EXTRA_APP_NAMES = ['qortium-core', 'qortium-home'];
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -166,19 +174,26 @@ function CommandButton({
 }
 
 function PostComposer({
+  appNames,
   canPublish,
+  initialApp,
+  initialType,
   onSubmit,
   publishName,
   publishing,
   t,
 }: {
+  appNames: string[];
   canPublish: boolean;
-  onSubmit: (type: FeedbackKind, title: string, body: string) => Promise<boolean>;
+  initialApp?: string | null;
+  initialType?: FeedbackKind;
+  onSubmit: (type: FeedbackKind, title: string, body: string, app: string | null) => Promise<boolean>;
   publishName: string;
   publishing: boolean;
   t: ReturnType<typeof createTranslator>;
 }) {
-  const [type, setType] = useState<FeedbackKind>('issue');
+  const [type, setType] = useState<FeedbackKind>(initialType ?? 'issue');
+  const [app, setApp] = useState(initialApp ?? '');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
 
@@ -189,12 +204,13 @@ function PostComposer({
       return;
     }
 
-    const success = await onSubmit(type, title, body);
+    const success = await onSubmit(type, title, body, app.trim() || null);
 
     if (success) {
+      setApp(initialApp ?? '');
       setTitle('');
       setBody('');
-      setType('issue');
+      setType(initialType ?? 'issue');
     }
   }
 
@@ -223,6 +239,22 @@ function PostComposer({
           </button>
         </div>
       </div>
+      <label>
+        <span>{t('field.app')}</span>
+        <select
+          disabled={!canPublish || publishing}
+          onChange={(event) => setApp(event.target.value)}
+          value={app}
+        >
+          <option value="">{t('field.appPlaceholder')}</option>
+          {initialApp && !appNames.includes(initialApp) ? (
+            <option value={initialApp}>{initialApp}</option>
+          ) : null}
+          {appNames.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+        </select>
+      </label>
       <label>
         <span>{t('field.title')}</span>
         <input
@@ -284,6 +316,7 @@ function FeedItem({
           {getDisplayName(post.ownerName)} · {formatRelativeTime(post.updated)}
           {edited ? ` · ${t('label.edited')}` : ''}
         </span>
+        {post.payload.app ? <span className="app-pill">{post.payload.app}</span> : null}
       </span>
       <span className="reply-count">
         <MessageSquare aria-hidden="true" />
@@ -415,6 +448,7 @@ function ReplyComposer({
 
 export default function App() {
   const [displaySettings, setDisplaySettings] = useState(getInitialDisplaySettings);
+  const [deepLink] = useState(getInitialDeepLinkParams);
   const [bridgeState, setBridgeState] = useState<BridgeState>(emptyBridgeState);
   const [accountContext, setAccountContext] = useState<AccountContext>({ account: null, writableNames: [] });
   const [accountError, setAccountError] = useState<string | null>(null);
@@ -431,6 +465,7 @@ export default function App() {
   const [postEditBody, setPostEditBody] = useState('');
   const [commentEditId, setCommentEditId] = useState<string | null>(null);
   const [commentEditBody, setCommentEditBody] = useState('');
+  const [appNames, setAppNames] = useState<string[]>([]);
 
   const t = useMemo(() => createTranslator(displaySettings.language), [displaySettings.language]);
   const accountLocked = accountContext.account?.isUnlocked === false;
@@ -511,6 +546,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    loadPublishedAppNames().then((names) => {
+      const merged = [...new Set([...names, ...EXTRA_APP_NAMES])].sort((a, b) => a.localeCompare(b));
+      setAppNames(merged);
+    });
+  }, []);
+
   const commentsByPostId = useMemo(() => {
     const map = new Map<string, FeedbackResource<FeedbackCommentPayload>[]>();
 
@@ -538,8 +580,16 @@ export default function App() {
       return data.posts.filter((post) => post.payload.type === filter);
     }
 
+    if (filter === 'myApps') {
+      return data.posts.filter(
+        (post) =>
+          post.payload.app &&
+          accountContext.writableNames.some((name) => name.toLowerCase() === post.payload.app!.toLowerCase()),
+      );
+    }
+
     return data.posts;
-  }, [data.posts, filter]);
+  }, [accountContext.writableNames, data.posts, filter]);
   const selectedPost = data.posts.find((post) => post.payload.id === selectedPostId) ?? null;
   const selectedComments = selectedPost ? commentsByPostId.get(selectedPost.payload.id) ?? [] : [];
 
@@ -597,8 +647,8 @@ export default function App() {
     }
   }
 
-  async function handleCreatePost(type: FeedbackKind, title: string, body: string) {
-    return publishAndRefresh(createPostPayload(type, title, body));
+  async function handleCreatePost(type: FeedbackKind, title: string, body: string, app: string | null) {
+    return publishAndRefresh(createPostPayload(type, title, body, app));
   }
 
   async function handleCreateComment(body: string) {
@@ -729,7 +779,16 @@ export default function App() {
             </label>
           </div>
 
-          <PostComposer canPublish={canPublish} onSubmit={handleCreatePost} publishName={publishName} publishing={busy} t={t} />
+          <PostComposer
+            appNames={appNames}
+            canPublish={canPublish}
+            initialApp={deepLink.app}
+            initialType={deepLink.type ?? undefined}
+            onSubmit={handleCreatePost}
+            publishName={publishName}
+            publishing={busy}
+            t={t}
+          />
 
           <div className="feed-toolbar">
             <span className="section-title">{t('label.feedback')}</span>
@@ -751,6 +810,16 @@ export default function App() {
                         : t('filter.orphan')}
                 </button>
               ))}
+              {accountContext.writableNames.length > 0 ? (
+                <button
+                  aria-pressed={filter === 'myApps'}
+                  className={filter === 'myApps' ? 'is-selected' : ''}
+                  onClick={() => setFilter('myApps')}
+                  type="button"
+                >
+                  {t('filter.myApps')}
+                </button>
+              ) : null}
             </div>
           </div>
 
@@ -759,10 +828,38 @@ export default function App() {
 
           <div className="feed-list">
             {loadState === 'loading' ? <EmptyState text={t('label.loading')} /> : null}
-            {loadState !== 'loading' && filter !== 'orphan' && filteredPosts.length === 0 ? (
+            {loadState !== 'loading' && filter === 'myApps' && filteredPosts.length === 0 ? (
+              <EmptyState text={t('empty.myApps')} />
+            ) : null}
+            {loadState !== 'loading' && filter !== 'orphan' && filter !== 'myApps' && filteredPosts.length === 0 ? (
               <EmptyState text={t('empty.posts')} />
             ) : null}
-            {filter !== 'orphan'
+            {filter === 'myApps'
+              ? Array.from(
+                  filteredPosts.reduce((map, post) => {
+                    const appName = post.payload.app!;
+                    const group = map.get(appName) ?? [];
+                    group.push(post);
+                    map.set(appName, group);
+                    return map;
+                  }, new Map<string, typeof filteredPosts>()),
+                ).map(([appName, posts]) => (
+                  <div className="app-group" key={appName}>
+                    <span className="app-group__label">{appName}</span>
+                    {posts.map((post) => (
+                      <FeedItem
+                        active={post.payload.id === selectedPostId}
+                        commentCount={commentsByPostId.get(post.payload.id)?.length ?? 0}
+                        key={post.identifier}
+                        onSelect={() => setSelectedPostId(post.payload.id)}
+                        post={post}
+                        t={t}
+                      />
+                    ))}
+                  </div>
+                ))
+              : null}
+            {filter !== 'orphan' && filter !== 'myApps'
               ? filteredPosts.map((post) => (
                   <FeedItem
                     active={post.payload.id === selectedPostId}
@@ -812,6 +909,7 @@ export default function App() {
                       <span>{getDisplayName(selectedPost.ownerName)}</span>
                       <span>{formatRelativeTime(selectedPost.updated)}</span>
                       {selectedPost.payload.updatedAt > selectedPost.payload.createdAt ? <span>{t('label.edited')}</span> : null}
+                      {selectedPost.payload.app ? <span className="app-pill">{selectedPost.payload.app}</span> : null}
                     </div>
                   </div>
                   {canPublishResource && canOwnResource(selectedPost, accountContext.writableNames) ? (

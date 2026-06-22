@@ -27,6 +27,7 @@ export type FeedbackAttachment = {
 };
 
 export type FeedbackPostPayload = {
+  app?: string | null;
   attachments: FeedbackAttachment[];
   body: string;
   createdAt: number;
@@ -216,12 +217,14 @@ function normalizePayload(value: unknown): FeedbackPayload | null {
   if (kind === 'post') {
     const title = getString(value.title);
     const type = getString(value.type);
+    const app = getString(value.app) || null;
 
     if (!title || (type !== 'issue' && type !== 'idea')) {
       return null;
     }
 
     return {
+      app,
       attachments: normalizeAttachments(value.attachments),
       body,
       createdAt,
@@ -391,11 +394,49 @@ export function canOwnResource(resource: FeedbackResource, writableNames: string
   return writableNames.some((name) => name.toLowerCase() === resource.ownerName.toLowerCase());
 }
 
-export function createPostPayload(type: FeedbackKind, title: string, body: string): FeedbackPostPayload {
+export async function loadPublishedAppNames(): Promise<string[]> {
+  try {
+    const resources = await qdnRequest<unknown>({
+      action: 'SEARCH_QDN_RESOURCES',
+      includeMetadata: false,
+      includeStatus: false,
+      limit: 200,
+      mode: 'ALL',
+      reverse: false,
+      service: 'APP',
+    });
+
+    const names = new Set<string>();
+
+    if (Array.isArray(resources)) {
+      for (const resource of resources) {
+        if (isRecord(resource)) {
+          const name = getString(resource.name);
+
+          if (name) {
+            names.add(name);
+          }
+        }
+      }
+    }
+
+    return [...names].sort((a, b) => a.localeCompare(b));
+  } catch {
+    return [];
+  }
+}
+
+export function createPostPayload(
+  type: FeedbackKind,
+  title: string,
+  body: string,
+  app?: string | null,
+): FeedbackPostPayload {
   const id = createFeedbackId();
   const now = Date.now();
 
   return {
+    app: app?.trim() || null,
     attachments: [],
     body: normalizeBody(body),
     createdAt: now,

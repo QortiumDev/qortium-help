@@ -8,11 +8,15 @@
 // qdn:// address it is also clickable inside post/comment bodies (see
 // feedbackLinks), opening a new Home tab focused on that item.
 
+import type { FeedbackKind } from './qdnFeedback';
+
 const DEFAULT_SERVICE = 'APP';
 const DEFAULT_NAME = 'Help';
 const DEFAULT_IDENTIFIER = 'Help';
 
 export const POST_QUERY_PARAM = 'post';
+export const APP_QUERY_PARAM = 'app';
+export const TYPE_QUERY_PARAM = 'type';
 
 type LocationLike = {
   pathname?: string;
@@ -84,4 +88,23 @@ export function getInitialPostId(search?: string): string | null {
   const value = new URLSearchParams(raw).get(POST_QUERY_PARAM)?.trim();
 
   return value ? value : null;
+}
+
+export type ComposerParams = {
+  app: string | null;
+  type: FeedbackKind | null;
+};
+
+// A second, independent deep link: `qdn://APP/Help/Help?app=<name>&type=<issue|idea>`
+// pre-fills the composer (which app the feedback is about, and its kind) so other
+// apps can hand off straight into a relevant "file feedback" form. Both params are
+// optional; `type` is only honoured for the two known kinds.
+export function getInitialComposerParams(search?: string): ComposerParams {
+  const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
+  const query = new URLSearchParams(raw);
+  const app = query.get(APP_QUERY_PARAM)?.trim() || null;
+  const rawType = query.get(TYPE_QUERY_PARAM);
+  const type: FeedbackKind | null = rawType === 'issue' || rawType === 'idea' ? rawType : null;
+
+  return { app, type };
 }

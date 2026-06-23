@@ -28,6 +28,7 @@ export type FeedbackAttachment = {
 };
 
 export type FeedbackPostPayload = {
+  app?: string | null;
   attachments: FeedbackAttachment[];
   body: string;
   createdAt: number;
@@ -211,12 +212,14 @@ function normalizePayload(value: unknown): FeedbackPayload | null {
     const title = getString(value.title);
     const type = getString(value.type);
     const status = getString(value.status) === 'done' ? 'done' : 'open';
+    const app = getString(value.app) || null;
 
     if (!title || (type !== 'issue' && type !== 'idea')) {
       return null;
     }
 
     return {
+      app,
       attachments: normalizeAttachments(value.attachments),
       body,
       createdAt,
@@ -409,11 +412,65 @@ export function canOwnResource(resource: FeedbackResource, writableNames: string
   return writableNames.some((name) => name.toLowerCase() === resource.ownerName.toLowerCase());
 }
 
-export function createPostPayload(type: FeedbackKind, title: string, body: string): FeedbackPostPayload {
+const APP_NAMES_PAGE_SIZE = 100;
+const APP_NAMES_MAX_PAGES = 50;
+
+// Collect the registered names of every published APP resource, for the app
+// dropdown. LIST_QDN_RESOURCES maps to Core's /arbitrary/resources, which returns
+// names alphabetically (ORDER BY name COLLATE SQL_TEXT_UCC_NO_PAD); `default: true`
+// yields one row per name. We page until a short page signals the end, with two
+// safety valves: a hard page cap, and a stop if a full page surfaces nothing new
+// (guards against a node that ignores `offset`).
+export async function loadPublishedAppNames(): Promise<string[]> {
+  const names = new Set<string>();
+
+  try {
+    for (let page = 0; page < APP_NAMES_MAX_PAGES; page += 1) {
+      const resources = await qdnRequest<unknown>({
+        action: 'LIST_QDN_RESOURCES',
+        default: true,
+        includeMetadata: false,
+        includeStatus: false,
+        limit: APP_NAMES_PAGE_SIZE,
+        offset: page * APP_NAMES_PAGE_SIZE,
+        service: 'APP',
+      });
+
+      const batch = Array.isArray(resources) ? resources : [];
+      const sizeBefore = names.size;
+
+      for (const resource of batch) {
+        if (isRecord(resource)) {
+          const name = getString(resource.name);
+
+          if (name) {
+            names.add(name);
+          }
+        }
+      }
+
+      if (batch.length < APP_NAMES_PAGE_SIZE || names.size === sizeBefore) {
+        break;
+      }
+    }
+  } catch {
+    // Keep whatever we collected before the failure; the dropdown still works.
+  }
+
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+export function createPostPayload(
+  type: FeedbackKind,
+  title: string,
+  body: string,
+  app?: string | null,
+): FeedbackPostPayload {
   const id = createFeedbackId();
   const now = Date.now();
 
   return {
+    app: app?.trim() || null,
     attachments: [],
     body: normalizeBody(body),
     createdAt: now,
@@ -445,10 +502,11 @@ export function createCommentPayload(postId: string, body: string): FeedbackComm
 
 export function updatePostPayload(
   payload: FeedbackPostPayload,
-  patch: Pick<FeedbackPostPayload, 'body' | 'title' | 'type'>,
+  patch: Pick<FeedbackPostPayload, 'body' | 'title' | 'type'> & { app: string | null },
 ): FeedbackPostPayload {
   return {
     ...payload,
+    app: patch.app?.trim() || null,
     body: normalizeBody(patch.body),
     title: patch.title.trim(),
     type: patch.type,

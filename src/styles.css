@@ -791,6 +791,40 @@ textarea:focus {
   gap: 4px;
 }
 
+.app-pill {
+  background: var(--qh-accent-soft);
+  border: 1px solid var(--qh-accent-ring);
+  border-radius: var(--qh-radius-sm);
+  color: var(--qh-accent);
+  display: inline-block;
+  flex: none;
+  font-size: calc(var(--qh-text-small) * 0.92);
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.app-group {
+  display: contents;
+}
+
+.app-group__label {
+  background: var(--qh-rail);
+  border-bottom: 1px solid var(--qh-border);
+  color: var(--qh-text-secondary);
+  display: block;
+  font-family: var(--qh-font-mono, 'Illinois Mono', monospace);
+  font-size: var(--qh-text-small);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 6px 12px;
+  text-transform: lowercase;
+}
+
+.edit-app-select {
+  width: 100%;
+}
+
 .kind-mark {
   align-items: center;
   border-radius: var(--qh-radius);

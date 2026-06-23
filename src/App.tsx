@@ -22,7 +22,7 @@ import {
 import helpIconUrl from './assets/qortium-help-protoicon-black-transparent.png';
 import { createTranslator } from './i18n';
 import { copyTextToClipboard } from './clipboard';
-import { buildPostLink, getInitialPostId } from './deepLink';
+import { buildPostLink, getInitialComposerParams, getInitialPostId } from './deepLink';
 import { applyDisplaySettings, getDisplaySettingsUpdateFromMessage, getInitialDisplaySettings } from './displaySettings';
 import { renderFeedbackText } from './feedbackLinks';
 import { getBridgeState, hasAction } from './qdnRequest';
@@ -33,6 +33,7 @@ import {
   deleteFeedbackResource,
   loadAccountContext,
   loadFeedback,
+  loadPublishedAppNames,
   publishFeedbackPayload,
   setPostStatusPayload,
   unlockSelectedAccount,
@@ -47,7 +48,7 @@ import {
 import type { BridgeState } from './types';
 
 type LoadState = 'error' | 'loading' | 'ready';
-type FeedFilter = 'all' | 'completed' | 'idea' | 'issue' | 'open' | 'orphan';
+type FeedFilter = 'all' | 'completed' | 'idea' | 'issue' | 'myApps' | 'open' | 'orphan';
 type MainView = 'compose' | 'detail' | 'list';
 
 type FeedbackData = {
@@ -67,6 +68,10 @@ const emptyBridgeState: BridgeState = {
 };
 
 const FILTERS: FeedFilter[] = ['all', 'open', 'completed', 'issue', 'idea', 'orphan'];
+
+// qortium-core and qortium-home aren't published QDN APP resources, so they never
+// come back from the resource search — seed them into the app dropdown explicitly.
+const EXTRA_APP_NAMES = ['qortium-core', 'qortium-home'];
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -180,21 +185,28 @@ function CommandButton({
 }
 
 function PostComposer({
+  appNames,
   canPublish,
+  initialApp,
+  initialType,
   onCancel,
   onSubmit,
   publishName,
   publishing,
   t,
 }: {
+  appNames: string[];
   canPublish: boolean;
+  initialApp?: string | null;
+  initialType?: FeedbackKind;
   onCancel: () => void;
-  onSubmit: (type: FeedbackKind, title: string, body: string) => Promise<boolean>;
+  onSubmit: (type: FeedbackKind, title: string, body: string, app: string | null) => Promise<boolean>;
   publishName: string;
   publishing: boolean;
   t: ReturnType<typeof createTranslator>;
 }) {
-  const [type, setType] = useState<FeedbackKind>('issue');
+  const [type, setType] = useState<FeedbackKind>(initialType ?? 'issue');
+  const [app, setApp] = useState(initialApp ?? '');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
 
@@ -205,12 +217,15 @@ function PostComposer({
       return;
     }
 
-    const success = await onSubmit(type, title, body);
+    // `app` comes from a fixed dropdown (no stray whitespace); the payload factory
+    // is the single place that trims/normalises it, so don't trim again here.
+    const success = await onSubmit(type, title, body, app || null);
 
     if (success) {
       setTitle('');
       setBody('');
-      setType('issue');
+      setType(initialType ?? 'issue');
+      setApp(initialApp ?? '');
     }
   }
 
@@ -242,6 +257,24 @@ function PostComposer({
           <span>{t('kind.idea')}</span>
         </button>
       </div>
+      <label>
+        <span>{t('field.app')}</span>
+        <select
+          disabled={!canPublish || publishing}
+          onChange={(event) => setApp(event.target.value)}
+          value={app}
+        >
+          <option value="">{t('field.appPlaceholder')}</option>
+          {app && !appNames.some((name) => name.toLowerCase() === app.toLowerCase()) ? (
+            <option value={app}>{app}</option>
+          ) : null}
+          {appNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
       <label>
         <span>{t('field.title')}</span>
         <input
@@ -306,6 +339,7 @@ function FeedItem({
         <span className="feed-item__title">
           {completed ? <CheckCircle2 aria-hidden="true" className="feed-item__done" /> : null}
           <span className="feed-item__title-text">{post.payload.title}</span>
+          {post.payload.app ? <span className="app-pill">{post.payload.app}</span> : null}
         </span>
         <span className="feed-item__meta">
           {getDisplayName(post.ownerName)} · {formatRelativeTime(post.updated)}
@@ -458,9 +492,12 @@ export default function App() {
   const [postEditType, setPostEditType] = useState<FeedbackKind>('issue');
   const [postEditTitle, setPostEditTitle] = useState('');
   const [postEditBody, setPostEditBody] = useState('');
+  const [postEditApp, setPostEditApp] = useState('');
   const [commentEditId, setCommentEditId] = useState<string | null>(null);
   const [commentEditBody, setCommentEditBody] = useState('');
   const [pendingPostId, setPendingPostId] = useState<string | null>(() => getInitialPostId());
+  const [composer] = useState(getInitialComposerParams);
+  const [appNames, setAppNames] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
 
   const t = useMemo(() => createTranslator(displaySettings.language), [displaySettings.language]);
@@ -557,6 +594,21 @@ export default function App() {
     setPendingPostId(null);
   }, [pendingPostId, loadState, data.posts]);
 
+  useEffect(() => {
+    void loadPublishedAppNames().then((names) => {
+      setAppNames([...new Set([...names, ...EXTRA_APP_NAMES])].sort((a, b) => a.localeCompare(b)));
+    });
+  }, []);
+
+  // The My Apps filter is only offered to accounts with writable names; if that
+  // set empties (e.g. account switch / sign-out) drop back to the default filter
+  // so the view doesn't get stranded on a now-hidden tab.
+  useEffect(() => {
+    if (filter === 'myApps' && accountContext.writableNames.length === 0) {
+      setFilter('all');
+    }
+  }, [filter, accountContext.writableNames]);
+
   const commentsByPostId = useMemo(() => {
     const map = new Map<string, FeedbackResource<FeedbackCommentPayload>[]>();
 
@@ -581,11 +633,13 @@ export default function App() {
   );
 
   const filterCounts = useMemo(() => {
+    const writable = new Set(accountContext.writableNames.map((name) => name.toLowerCase()));
     const counts: Record<FeedFilter, number> = {
       all: data.posts.length,
       completed: 0,
       idea: 0,
       issue: 0,
+      myApps: 0,
       open: 0,
       orphan: orphanComments.length,
     };
@@ -602,10 +656,14 @@ export default function App() {
       } else {
         counts.idea += 1;
       }
+
+      if (post.payload.app && writable.has(post.payload.app.toLowerCase())) {
+        counts.myApps += 1;
+      }
     }
 
     return counts;
-  }, [data.posts, orphanComments.length]);
+  }, [data.posts, orphanComments.length, accountContext.writableNames]);
 
   const filteredPosts = useMemo(() => {
     switch (filter) {
@@ -616,10 +674,15 @@ export default function App() {
         return data.posts.filter((post) => post.payload.type === filter);
       case 'open':
         return data.posts.filter((post) => post.payload.status !== 'done');
+      case 'myApps': {
+        const writable = new Set(accountContext.writableNames.map((name) => name.toLowerCase()));
+
+        return data.posts.filter((post) => post.payload.app && writable.has(post.payload.app.toLowerCase()));
+      }
       default:
         return data.posts;
     }
-  }, [data.posts, filter]);
+  }, [data.posts, filter, accountContext.writableNames]);
 
   const selectedPost = data.posts.find((post) => post.payload.id === selectedPostId) ?? null;
   const selectedComments = selectedPost ? commentsByPostId.get(selectedPost.payload.id) ?? [] : [];
@@ -634,11 +697,26 @@ export default function App() {
         return t('filter.idea');
       case 'issue':
         return t('filter.issue');
+      case 'myApps':
+        return t('filter.myApps');
       case 'open':
         return t('filter.open');
       default:
         return t('filter.orphan');
     }
+  }
+
+  // Store the app tag using the name owner's own capitalisation: if the entered
+  // value matches a known app case-insensitively, snap it to that canonical name;
+  // otherwise keep what was entered (the payload factory trims it).
+  function canonicalAppName(app: string | null) {
+    const trimmed = app?.trim() ?? '';
+
+    if (!trimmed) {
+      return null;
+    }
+
+    return appNames.find((name) => name.toLowerCase() === trimmed.toLowerCase()) ?? trimmed;
   }
 
   function openComposer() {
@@ -717,8 +795,8 @@ export default function App() {
     }
   }
 
-  async function handleCreatePost(type: FeedbackKind, title: string, body: string) {
-    const success = await publishAndRefresh(createPostPayload(type, title, body));
+  async function handleCreatePost(type: FeedbackKind, title: string, body: string, app: string | null) {
+    const success = await publishAndRefresh(createPostPayload(type, title, body, canonicalAppName(app)));
 
     if (success) {
       setView('detail');
@@ -757,12 +835,14 @@ export default function App() {
     setPostEditType(post.payload.type);
     setPostEditTitle(post.payload.title);
     setPostEditBody(post.payload.body);
+    setPostEditApp(post.payload.app ?? '');
   }
 
   function cancelPostEdit() {
     setPostEditId(null);
     setPostEditTitle('');
     setPostEditBody('');
+    setPostEditApp('');
   }
 
   async function savePostEdit(post: FeedbackResource<FeedbackPostPayload>) {
@@ -772,6 +852,7 @@ export default function App() {
 
     const success = await publishAndRefresh(
       updatePostPayload(post.payload, {
+        app: canonicalAppName(postEditApp),
         body: postEditBody,
         title: postEditTitle,
         type: postEditType,
@@ -884,7 +965,7 @@ export default function App() {
               <ListFilter aria-hidden="true" />
               <span className="section-title">{t('label.filters')}</span>
             </div>
-            {FILTERS.map((value) => (
+            {(accountContext.writableNames.length > 0 ? [...FILTERS, 'myApps' as const] : FILTERS).map((value) => (
               <button
                 aria-pressed={filter === value}
                 className={`filter-nav__item ${filter === value ? 'is-selected' : ''}`}
@@ -906,7 +987,10 @@ export default function App() {
 
           {view === 'compose' ? (
             <PostComposer
+              appNames={appNames}
               canPublish={canPublish}
+              initialApp={composer.app}
+              initialType={composer.type ?? undefined}
               onCancel={backToList}
               onSubmit={handleCreatePost}
               publishName={publishName}
@@ -951,6 +1035,7 @@ export default function App() {
                       <span>{getDisplayName(selectedPost.ownerName)}</span>
                       <span>{formatRelativeTime(selectedPost.updated)}</span>
                       {selectedPost.payload.updatedAt > selectedPost.payload.createdAt ? <span>{t('label.edited')}</span> : null}
+                      {selectedPost.payload.app ? <span className="app-pill">{selectedPost.payload.app}</span> : null}
                     </div>
                   </div>
                   {canPublishResource && canOwnResource(selectedPost, accountContext.writableNames) ? (
@@ -1004,6 +1089,22 @@ export default function App() {
                         <span>{t('kind.idea')}</span>
                       </button>
                     </div>
+                    <select
+                      className="edit-app-select"
+                      disabled={busy}
+                      onChange={(event) => setPostEditApp(event.target.value)}
+                      value={postEditApp}
+                    >
+                      <option value="">{t('field.appPlaceholder')}</option>
+                      {postEditApp && !appNames.some((name) => name.toLowerCase() === postEditApp.toLowerCase()) ? (
+                        <option value={postEditApp}>{postEditApp}</option>
+                      ) : null}
+                      {appNames.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
                     <input
                       autoFocus
                       disabled={busy}
@@ -1073,10 +1174,13 @@ export default function App() {
               </div>
               <div className="feed-list">
                 {loadState === 'loading' ? <EmptyState text={t('label.loading')} /> : null}
-                {loadState !== 'loading' && filter !== 'orphan' && filteredPosts.length === 0 ? (
+                {loadState !== 'loading' && filter !== 'orphan' && filter !== 'myApps' && filteredPosts.length === 0 ? (
                   <EmptyState text={t('empty.posts')} />
                 ) : null}
-                {filter !== 'orphan'
+                {loadState !== 'loading' && filter === 'myApps' && filteredPosts.length === 0 ? (
+                  <EmptyState text={t('empty.myApps')} />
+                ) : null}
+                {filter !== 'orphan' && filter !== 'myApps'
                   ? filteredPosts.map((post) => (
                       <FeedItem
                         commentCount={commentsByPostId.get(post.payload.id)?.length ?? 0}
@@ -1085,6 +1189,32 @@ export default function App() {
                         post={post}
                         t={t}
                       />
+                    ))
+                  : null}
+                {filter === 'myApps'
+                  ? Array.from(
+                      filteredPosts.reduce((map, post) => {
+                        const appName = post.payload.app!;
+                        const group = map.get(appName) ?? [];
+
+                        group.push(post);
+                        map.set(appName, group);
+
+                        return map;
+                      }, new Map<string, typeof filteredPosts>()),
+                    ).map(([appName, posts]) => (
+                      <div className="app-group" key={appName}>
+                        <span className="app-group__label">{appName}</span>
+                        {posts.map((post) => (
+                          <FeedItem
+                            commentCount={commentsByPostId.get(post.payload.id)?.length ?? 0}
+                            key={post.identifier}
+                            onSelect={() => openDetail(post.payload.id)}
+                            post={post}
+                            t={t}
+                          />
+                        ))}
+                      </div>
                     ))
                   : null}
                 {filter === 'orphan' && orphanComments.length === 0 ? <EmptyState text={t('empty.orphans')} /> : null}

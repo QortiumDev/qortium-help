@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPostLink, getAppBaseAddress, getInitialPostId } from './deepLink';
+import { buildPostLink, getAppBaseAddress, getInitialComposerParams, getInitialPostId } from './deepLink';
 
 describe('deep links', () => {
   it('reads the post id from the render query string', () => {
@@ -7,6 +7,14 @@ describe('deep links', () => {
     expect(getInitialPostId('?theme=dark')).toBeNull();
     expect(getInitialPostId('')).toBeNull();
     expect(getInitialPostId('?post=%20')).toBeNull();
+  });
+
+  it('reads composer pre-fill params from the query string', () => {
+    expect(getInitialComposerParams('?app=Wallet&type=issue&theme=dark')).toEqual({ app: 'Wallet', type: 'issue' });
+    expect(getInitialComposerParams('?app=Chat&type=idea')).toEqual({ app: 'Chat', type: 'idea' });
+    expect(getInitialComposerParams('?app=%20')).toEqual({ app: null, type: null });
+    expect(getInitialComposerParams('?type=bogus')).toEqual({ app: null, type: null });
+    expect(getInitialComposerParams('')).toEqual({ app: null, type: null });
   });
 
   it('prefers the identity Core injects as page globals', () => {

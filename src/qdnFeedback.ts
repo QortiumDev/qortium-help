@@ -315,6 +315,43 @@ async function searchFeedbackResources(identifierPrefix: string, limit: number) 
   return normalizeResources(resources);
 }
 
+// Cache fetched resource payloads keyed by service+identifier, tagged with the
+// resource's latestSignature. A QDN resource is immutable per signature, so when
+// a later search returns the same signature we can skip re-downloading it. This
+// turns a full N+1 re-fetch on every refresh into a fetch of only changed/new
+// resources (eff-1).
+type CachedFeedbackResource = { signature: string; value: FeedbackResource<FeedbackPayload> };
+
+const feedbackResourceCache = new Map<string, CachedFeedbackResource>();
+
+function resourceCacheKey(resource: QdnResource) {
+  return `${resource.service}:${resource.identifier}`;
+}
+
+async function fetchFeedbackResourceCached<T extends FeedbackPayload>(
+  resource: QdnResource,
+  expectedKind: T['kind'],
+): Promise<FeedbackResource<T> | null> {
+  const key = resourceCacheKey(resource);
+  const signature = typeof resource.latestSignature === 'string' ? resource.latestSignature : null;
+
+  if (signature) {
+    const cached = feedbackResourceCache.get(key);
+
+    if (cached && cached.signature === signature && cached.value.payload.kind === expectedKind) {
+      return cached.value as FeedbackResource<T>;
+    }
+  }
+
+  const value = await fetchFeedbackResource<T>(resource, expectedKind);
+
+  if (value && signature) {
+    feedbackResourceCache.set(key, { signature, value });
+  }
+
+  return value;
+}
+
 export async function loadFeedback(limit = 120) {
   const [postResources, commentResources] = await Promise.all([
     searchFeedbackResources(FEEDBACK_POST_PREFIX, limit),
@@ -322,9 +359,19 @@ export async function loadFeedback(limit = 120) {
   ]);
 
   const [posts, comments] = await Promise.all([
-    Promise.all(postResources.map((resource) => fetchFeedbackResource<FeedbackPostPayload>(resource, 'post'))),
-    Promise.all(commentResources.map((resource) => fetchFeedbackResource<FeedbackCommentPayload>(resource, 'comment'))),
+    Promise.all(postResources.map((resource) => fetchFeedbackResourceCached<FeedbackPostPayload>(resource, 'post'))),
+    Promise.all(commentResources.map((resource) => fetchFeedbackResourceCached<FeedbackCommentPayload>(resource, 'comment'))),
   ]);
+
+  // Drop cache entries for resources no longer returned (deleted/aged out) so the
+  // cache stays bounded to the live result set.
+  const liveKeys = new Set([...postResources, ...commentResources].map(resourceCacheKey));
+
+  for (const key of feedbackResourceCache.keys()) {
+    if (!liveKeys.has(key)) {
+      feedbackResourceCache.delete(key);
+    }
+  }
 
   return {
     comments: comments

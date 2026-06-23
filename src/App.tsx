@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
@@ -344,6 +344,7 @@ function FeedItem({
     <button className={`feed-item ${completed ? 'is-completed' : ''}`} onClick={onSelect} type="button">
       <span className={`kind-mark kind-mark--${post.payload.type}`}>
         <IconForKind type={post.payload.type} />
+        <span className="sr-only">{post.payload.type === 'issue' ? t('kind.issue') : t('kind.idea')}</span>
       </span>
       <span className="feed-item__body">
         <span className="feed-item__title">
@@ -509,6 +510,7 @@ export default function App() {
   const [composer] = useState(getInitialComposerParams);
   const [appNames, setAppNames] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
+  const refreshTokenRef = useRef(0);
 
   const t = useMemo(() => createTranslator(displaySettings.language), [displaySettings.language]);
   const accountLocked = accountContext.account?.isUnlocked === false;
@@ -522,7 +524,7 @@ export default function App() {
     accountContext.writableNames.some((name) => name === publishName);
   const canDelete = canUseSelectedAccount && hasAction(bridgeState.actions, 'DELETE_QDN_RESOURCE');
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     applyDisplaySettings(displaySettings);
   }, [displaySettings]);
 
@@ -564,11 +566,19 @@ export default function App() {
   }
 
   async function refreshFeedback() {
+    // Tag this refresh so a slower in-flight load cannot clobber the result of a
+    // newer one (e.g. refresh fired again after a publish/delete) (core-1).
+    const token = ++refreshTokenRef.current;
+
     setLoadState('loading');
     setLoadError(null);
 
     try {
       const nextData = await loadFeedback();
+
+      if (token !== refreshTokenRef.current) {
+        return;
+      }
 
       setData(nextData);
       setLoadState('ready');
@@ -580,6 +590,10 @@ export default function App() {
         return null;
       });
     } catch (error) {
+      if (token !== refreshTokenRef.current) {
+        return;
+      }
+
       setLoadState('error');
       setLoadError(getErrorMessage(error, t('error.load')));
     }

@@ -895,7 +895,9 @@ textarea:focus {
 }
 
 .post-detail h2 {
-  font-size: clamp(20px, 4vw, 32px);
+  /* resp-4: grow the heading ceiling with the text-size scale so the title
+     stays larger than body text at the largest scales (default 32px at scale 1). */
+  font-size: clamp(20px, 4vw, calc(28px + 4px * var(--qh-scale)));
   letter-spacing: 0;
   line-height: 1.16;
   margin: 0;
@@ -976,10 +978,10 @@ textarea:focus {
 .app-watermark {
   bottom: 12px;
   color: var(--qh-accent);
+  inset-inline-end: 12px;
   opacity: 0.12;
   pointer-events: none;
   position: fixed;
-  right: 12px;
 }
 
 .app-watermark svg {

@@ -45,7 +45,7 @@ function parseResponseData(body: string, contentType: string) {
   return body;
 }
 
-function sanitizeNodePath(path: unknown) {
+export function sanitizeNodePath(path: unknown) {
   if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) {
     throw new Error('Node API paths must start with /.');
   }
@@ -59,7 +59,7 @@ function sanitizeNodePath(path: unknown) {
   return `${url.pathname}${url.search}`;
 }
 
-function sanitizeReadMethod(method: unknown) {
+export function sanitizeReadMethod(method: unknown) {
   const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
   if (normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD') {

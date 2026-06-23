@@ -58,6 +58,11 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'status.open': '開放中',
   'status.ready': '就緒',
   'time.now': '剛才',
+  'action.loadMore': '載入更多',
+  'empty.search': '沒有符合的意見回饋',
+  'field.search': '搜尋意見回饋',
+  'label.publishingHint': '正在發布到 QDN — 網路確認時可能需要一點時間。',
+  'status.publishing': '發布中…',
 };
 
 export default MESSAGES;

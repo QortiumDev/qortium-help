@@ -17,8 +17,10 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'action.reopen': 'Ava uuesti',
   'action.reply': 'Vasta',
   'action.save': 'Salvesta',
+  'action.loadMore': 'Laadi rohkem',
   'empty.comments': 'Veel vastuseid pole',
   'empty.myApps': 'Sinu rakendustele veel pole tagasisidet',
+  'empty.search': 'Sobivat tagasisidet pole',
   'empty.orphans': 'Orvavastuseid pole',
   'empty.posts': 'Siin pole veel midagi',
   'error.account': 'Konto pole saadaval',
@@ -31,6 +33,7 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'field.name': 'Nimi',
   'field.reply': 'Vastus',
   'field.title': 'Pealkiri',
+  'field.search': 'Otsi tagasisidet',
   'filter.all': 'Kõik',
   'filter.completed': 'Lõpetatud',
   'filter.idea': 'Ideed',
@@ -46,6 +49,8 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'label.filters': 'Filtrid',
   'label.home': 'Home',
   'label.loading': 'Laadimine',
+  'label.publishingHint':
+    'Avaldamine QDN-i — see võib võrgu kinnitamisel veidi aega võtta.',
   'label.local': 'Brauser',
   'label.orphan': 'Orv',
   'label.replies': 'Vastused',
@@ -57,6 +62,7 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'status.locked': 'Lukus',
   'status.open': 'Avatud',
   'status.ready': 'Valmis',
+  'status.publishing': 'Avaldamine…',
   'time.now': 'Nüüd',
 };
 

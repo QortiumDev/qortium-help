@@ -52,11 +52,16 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'label.select': 'Válassz egy elemet',
   'status.completed': 'Befejezve',
   'status.copied': 'Másolva',
+  'status.publishing': 'Közzététel…',
   'status.noName': 'Nincs név',
   'status.noWrite': 'Csak olvasás',
   'status.locked': 'Zárolva',
   'status.open': 'Nyitva',
   'status.ready': 'Kész',
+  'action.loadMore': 'Továbbiak betöltése',
+  'empty.search': 'Nincs egyező visszajelzés',
+  'field.search': 'Visszajelzés keresése',
+  'label.publishingHint': 'Közzététel QDN-re — ez eltarthat egy ideig, amíg a hálózat megerősíti.',
   'time.now': 'Most'
 };
 

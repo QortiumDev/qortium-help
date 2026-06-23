@@ -1091,6 +1091,37 @@ textarea:focus-visible {
   }
 }
 
+/* search-1: feed search box (sits between the list head and the feed). */
+.list-view__search {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.list-view__search svg {
+  color: var(--qh-muted);
+  flex-shrink: 0;
+  height: 18px;
+  width: 18px;
+}
+
+/* scale-1: centred "Load more" affordance below the bounded feed window. */
+.load-more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 4px;
+}
+
+/* latency-1: publish-confirmation hint shown under the composer while a slow
+   QDN write awaits network confirmation. */
+.composer__hint {
+  color: var(--qh-muted);
+  font-size: var(--qh-text-small);
+  margin: 0;
+  padding: 0 12px 12px;
+}
+
 /* resp-1: enlarge interactive targets to ~44px on touch/coarse pointers
    (WCAG 2.5.5 / Apple HIG), where the default 38px/30px controls are too small. */
 @media (pointer: coarse) {

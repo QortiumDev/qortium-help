@@ -32,7 +32,7 @@
 
 :root {
   --qh-scale: 1;
-  --qh-text: calc(15px * var(--qh-scale));
+  --qh-text: calc(16px * var(--qh-scale));
   --qh-text-small: calc(12px * var(--qh-scale));
   --qh-text-title: calc(22px * var(--qh-scale));
   --qh-text-heading: calc(18px * var(--qh-scale));
@@ -693,18 +693,34 @@ textarea:focus {
 }
 
 .notice {
+  align-items: center;
   background: var(--qh-warning-soft);
   border: 1px solid color-mix(in srgb, var(--qh-warning) 35%, transparent);
   border-radius: var(--qh-radius-sm);
   color: var(--qh-warning);
+  display: flex;
   font-size: var(--qh-text-small);
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+}
+
+.notice__text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .notice--error {
   background: var(--qh-error-soft);
   border-color: color-mix(in srgb, var(--qh-error) 35%, transparent);
   color: var(--qh-error);
+}
+
+/* ux-error-1: neutral (non-error) notice for the copy-link manual fallback. */
+.notice--link {
+  background: var(--qh-accent-soft);
+  border-color: var(--qh-accent-ring);
+  color: var(--qh-text-secondary);
 }
 
 .feed-list,
@@ -1068,6 +1084,26 @@ textarea:focus {
 
   .main-panel {
     overflow: visible;
+  }
+
+  /* mobile-1: lay the filters out as a horizontal scrolling chip row instead of
+     a tall vertical stack that pushes the feed down the page. */
+  .filter-nav {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .filter-nav__title {
+    display: none;
+  }
+
+  .filter-nav__item {
+    flex: 0 0 auto;
+    justify-content: center;
+    width: auto;
   }
 }
 

@@ -530,6 +530,7 @@ export default function App() {
   const [composer] = useState(getInitialComposerParams);
   const [appNames, setAppNames] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
+  const [copyFallback, setCopyFallback] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(FEED_PAGE_SIZE);
   const refreshTokenRef = useRef(0);
@@ -563,6 +564,12 @@ export default function App() {
       setDisplaySettings((current) => getDisplaySettingsUpdateFromMessage(event.data, current) ?? current);
 
       if (isSelectedAccountChangedMessage(event.data)) {
+        // Re-fetch the bridge action set too: Home applies a node-mode switch
+        // instantly, which changes whether write actions (publish/delete) are
+        // offered, so the gating controls must update in-session (showactions-1).
+        void getBridgeState()
+          .then(setBridgeState)
+          .catch(() => {});
         void refreshAccount();
       }
     }
@@ -903,7 +910,9 @@ export default function App() {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } else {
-      setLoadError(buildPostLink(post.payload.id));
+      // Clipboard blocked (e.g. insecure context): surface the link in its own
+      // neutral, dismissible notice to copy by hand — not the red error banner.
+      setCopyFallback(buildPostLink(post.payload.id));
     }
   }
 
@@ -1066,7 +1075,19 @@ export default function App() {
         <section className="main-panel">
           {loadError ? (
             <div className="notice notice--error" role="alert">
-              {loadError}
+              <span className="notice__text">{loadError}</span>
+              <IconButton label={t('action.cancel')} onClick={() => setLoadError(null)} variant="ghost">
+                <X aria-hidden="true" />
+              </IconButton>
+            </div>
+          ) : null}
+
+          {copyFallback ? (
+            <div className="notice notice--link" role="status">
+              <span className="notice__text">{copyFallback}</span>
+              <IconButton label={t('action.cancel')} onClick={() => setCopyFallback(null)} variant="ghost">
+                <X aria-hidden="true" />
+              </IconButton>
             </div>
           ) : null}
 

@@ -304,7 +304,7 @@ svg {
 .app-shell {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -1080,6 +1080,14 @@ textarea:focus {
     border-bottom: 1px solid var(--qh-border);
     border-inline-end: 0;
     max-height: none;
+  }
+
+  /* On narrow screens drop the fixed-height shell so the whole page scrolls
+     naturally instead of trapping the feed in an internal scroll area. */
+  .app-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
   }
 
   .main-panel {

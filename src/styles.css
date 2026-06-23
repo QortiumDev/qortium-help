@@ -267,12 +267,15 @@
 html,
 body,
 #root {
-  min-height: 100%;
+  height: 100%;
 }
 
 body {
   margin: 0;
   background: var(--qh-page);
+  /* The shell fills the host/iframe exactly and the sidebar/main panels own
+     their scrolling, so the outer document never scrolls. */
+  overflow: hidden;
 }
 
 button,
@@ -304,7 +307,7 @@ svg {
 .app-shell {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -1080,18 +1083,6 @@ textarea:focus {
     border-bottom: 1px solid var(--qh-border);
     border-inline-end: 0;
     max-height: none;
-  }
-
-  /* On narrow screens drop the fixed-height shell so the whole page scrolls
-     naturally instead of trapping the feed in an internal scroll area. */
-  .app-shell {
-    height: auto;
-    min-height: 100dvh;
-    overflow: visible;
-  }
-
-  .main-panel {
-    overflow: visible;
   }
 
   /* mobile-1: lay the filters out as a horizontal scrolling chip row instead of

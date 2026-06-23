@@ -1208,6 +1208,57 @@ textarea:focus-visible {
   width: 18px;
 }
 
+/* sort-1: compact sort dropdown sitting beside the search box. */
+.sort-select {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.list-view__search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+/* cap-appnav-1: the detail app pill is an actionable button (opens the app). */
+.app-pill--button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.app-pill--button:hover {
+  background: color-mix(in srgb, var(--qh-accent) 18%, transparent);
+}
+
+/* ux-confirm-1: lightweight modal for the delete confirmation. */
+.modal-overlay {
+  align-items: center;
+  background: rgb(0 0 0 / 45%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 50;
+}
+
+.modal {
+  background: var(--qh-surface);
+  border: 1px solid var(--qh-border);
+  border-radius: var(--qh-radius);
+  box-shadow: var(--qh-shadow-hover);
+  display: grid;
+  gap: 16px;
+  max-width: 420px;
+  padding: 20px;
+  width: 100%;
+}
+
+.modal__body {
+  color: var(--qh-text-primary);
+  margin: 0;
+}
+
 /* scale-1: centred "Load more" affordance below the bounded feed window. */
 .load-more {
   display: flex;

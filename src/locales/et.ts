@@ -18,6 +18,7 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'action.reply': 'Vasta',
   'action.save': 'Salvesta',
   'action.loadMore': 'Laadi rohkem',
+  'action.openApp': 'Ava rakendus',
   'empty.comments': 'Veel vastuseid pole',
   'empty.myApps': 'Sinu rakendustele veel pole tagasisidet',
   'empty.search': 'Sobivat tagasisidet pole',
@@ -34,6 +35,7 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'field.reply': 'Vastus',
   'field.title': 'Pealkiri',
   'field.search': 'Otsi tagasisidet',
+  'label.sort': 'Sorteeri',
   'filter.all': 'Kõik',
   'filter.completed': 'Lõpetatud',
   'filter.idea': 'Ideed',
@@ -51,6 +53,7 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'label.loading': 'Laadimine',
   'label.publishingHint':
     'Avaldamine QDN-i — see võib võrgu kinnitamisel veidi aega võtta.',
+  'confirm.delete': 'Kustutada selle kirje? Vastused jäävad ilma algpostituseta.',
   'label.local': 'Brauser',
   'label.orphan': 'Orv',
   'label.replies': 'Vastused',
@@ -63,6 +66,10 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'status.open': 'Avatud',
   'status.ready': 'Valmis',
   'status.publishing': 'Avaldamine…',
+  'sort.active': 'Hiljuti aktiivsed',
+  'sort.newest': 'Uusimad',
+  'sort.oldest': 'Vanimad',
+  'sort.replies': 'Enim vastuseid',
   'time.now': 'Nüüd',
 };
 

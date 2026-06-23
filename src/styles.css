@@ -782,6 +782,32 @@ textarea:focus {
   gap: 6px;
 }
 
+/* cap-avatar-1: round author avatar with an initial fallback. */
+.avatar {
+  align-items: center;
+  background: var(--qh-control);
+  border-radius: 50%;
+  color: var(--qh-text-secondary);
+  display: inline-flex;
+  flex-shrink: 0;
+  font-weight: 700;
+  justify-content: center;
+  line-height: 1;
+  overflow: hidden;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.avatar__fallback {
+  font-size: 0.7em;
+}
+
+.avatar__img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
 .reply-count {
   align-items: center;
   color: var(--qh-muted);

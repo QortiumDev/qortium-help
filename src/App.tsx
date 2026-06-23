@@ -9,6 +9,7 @@ import {
   Lightbulb,
   Link as LinkIcon,
   ListFilter,
+  Loader2,
   MessageSquare,
   Plus,
   RefreshCw,
@@ -130,6 +131,15 @@ function StatusPill({ children, tone = 'neutral' }: { children: string; tone?: '
 
 function EmptyState({ text }: { text: string }) {
   return <div className="empty-state">{text}</div>;
+}
+
+function LoadingState({ text }: { text: string }) {
+  return (
+    <div className="empty-state empty-state--loading" role="status" aria-live="polite">
+      <Loader2 className="spinner" aria-hidden="true" />
+      <span>{text}</span>
+    </div>
+  );
 }
 
 function IconButton({
@@ -974,7 +984,7 @@ export default function App() {
                 type="button"
               >
                 <span>{getFilterLabel(value)}</span>
-                <span className="count-pill">{filterCounts[value]}</span>
+                <span className="count-pill">{loadState === 'loading' ? '—' : filterCounts[value]}</span>
               </button>
             ))}
           </nav>
@@ -1173,7 +1183,7 @@ export default function App() {
                 </CommandButton>
               </div>
               <div className="feed-list">
-                {loadState === 'loading' ? <EmptyState text={t('label.loading')} /> : null}
+                {loadState === 'loading' ? <LoadingState text={t('label.loading')} /> : null}
                 {loadState !== 'loading' && filter !== 'orphan' && filter !== 'myApps' && filteredPosts.length === 0 ? (
                   <EmptyState text={t('empty.posts')} />
                 ) : null}

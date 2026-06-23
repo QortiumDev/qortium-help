@@ -60,13 +60,35 @@ describe('feedback updates', () => {
       updatedAt: 1_000,
     };
 
-    expect(updatePostPayload(post, { body: ' new ', title: ' New ', type: 'idea' })).toEqual({
+    expect(updatePostPayload(post, { app: '  Wallet  ', body: ' new ', title: ' New ', type: 'idea' })).toEqual({
       ...post,
+      app: 'Wallet',
       body: 'new',
       title: 'New',
       type: 'idea',
       updatedAt: 2_000,
     });
+  });
+
+  it('clears the app tag when the patch app is empty', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(3_000);
+
+    const post: FeedbackPostPayload = {
+      app: 'Wallet',
+      attachments: [],
+      body: 'body',
+      createdAt: 1_000,
+      id: 'post123',
+      kind: 'post',
+      schema: FEEDBACK_SCHEMA,
+      status: 'open',
+      title: 'Title',
+      type: 'issue',
+      updatedAt: 1_000,
+    };
+
+    expect(updatePostPayload(post, { app: '', body: 'body', title: 'Title', type: 'issue' }).app).toBeNull();
   });
 
   it('marks a post complete while preserving its other fields', () => {

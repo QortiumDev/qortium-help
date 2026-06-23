@@ -23,6 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import helpIconUrl from './assets/qortium-help-protoicon-black-transparent.png';
+import { AttachmentList } from './attachments';
 import { Avatar } from './Avatar';
 import { createTranslator } from './i18n';
 import { copyTextToClipboard } from './clipboard';
@@ -49,7 +50,7 @@ import {
   type FeedbackPostPayload,
   type FeedbackResource,
 } from './qdnFeedback';
-import type { BridgeState } from './types';
+import type { BridgeState, QdnAction } from './types';
 
 type LoadState = 'error' | 'loading' | 'ready';
 type FeedFilter = 'all' | 'completed' | 'idea' | 'issue' | 'myApps' | 'open' | 'orphan';
@@ -380,6 +381,7 @@ function FeedItem({
 }
 
 function CommentView({
+  actions,
   canEdit,
   comment,
   editing,
@@ -392,6 +394,7 @@ function CommentView({
   saving,
   t,
 }: {
+  actions: QdnAction[];
   canEdit: boolean;
   comment: FeedbackResource<FeedbackCommentPayload>;
   editing: boolean;
@@ -431,7 +434,10 @@ function CommentView({
           </div>
         </div>
       ) : (
-        <p>{renderFeedbackText(comment.payload.body)}</p>
+        <>
+          <p>{renderFeedbackText(comment.payload.body)}</p>
+          <AttachmentList actions={actions} attachments={comment.payload.attachments} />
+        </>
       )}
       {canEdit && !editing ? (
         <div className="item-actions">
@@ -1211,7 +1217,10 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <p className="post-body">{renderFeedbackText(selectedPost.payload.body)}</p>
+                  <>
+                    <p className="post-body">{renderFeedbackText(selectedPost.payload.body)}</p>
+                    <AttachmentList actions={bridgeState.actions} attachments={selectedPost.payload.attachments} />
+                  </>
                 )}
               </article>
 
@@ -1225,6 +1234,7 @@ export default function App() {
                   {selectedComments.length === 0 ? <EmptyState text={t('empty.comments')} /> : null}
                   {selectedComments.map((comment) => (
                     <CommentView
+                      actions={bridgeState.actions}
                       canEdit={canPublishResource && canOwnResource(comment, accountContext.writableNames)}
                       comment={comment}
                       editValue={commentEditBody}

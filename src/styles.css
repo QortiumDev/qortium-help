@@ -808,6 +808,46 @@ textarea:focus {
   width: 100%;
 }
 
+/* cap-attachments-1: clickable attachment chips on a post/comment. */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.attachment {
+  align-items: center;
+  background: var(--qh-control);
+  border: 1px solid var(--qh-border);
+  border-radius: var(--qh-radius-sm);
+  color: var(--qh-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--qh-text-small);
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 10px;
+}
+
+.attachment:hover {
+  background: var(--qh-control-hover);
+}
+
+.attachment svg {
+  flex-shrink: 0;
+  height: 16px;
+  width: 16px;
+}
+
+.attachment__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .reply-count {
   align-items: center;
   color: var(--qh-muted);

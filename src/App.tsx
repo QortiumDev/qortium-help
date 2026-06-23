@@ -1112,10 +1112,6 @@ export default function App() {
 
       <section className="workspace">
         <aside className="sidebar">
-          <CommandButton disabled={busy} icon={<Plus aria-hidden="true" />} onClick={openComposer} variant="primary">
-            {t('action.newPost')}
-          </CommandButton>
-
           <div className="account-strip">
             <label>
               <span>{t('field.name')}</span>

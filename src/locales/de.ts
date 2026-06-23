@@ -13,11 +13,13 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'action.new': 'Neu',
   'action.newPost': 'Neuer Beitrag',
   'action.post': 'Beitrag',
+  'action.loadMore': 'Mehr laden',
   'action.refresh': 'Aktualisieren',
   'action.reopen': 'Wiedereröffnen',
   'action.reply': 'Antworten',
   'action.save': 'Speichern',
   'empty.comments': 'Noch keine Antworten',
+  'empty.search': 'Kein passendes Feedback',
   'empty.myApps': 'Noch kein Feedback für deine Apps',
   'empty.orphans': 'Keine verwaisten Antworten',
   'empty.posts': 'Noch nichts hier',
@@ -31,6 +33,7 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'field.name': 'Name',
   'field.reply': 'Antwort',
   'field.title': 'Titel',
+  'field.search': 'Feedback suchen',
   'filter.all': 'Alle',
   'filter.completed': 'Abgeschlossen',
   'filter.idea': 'Ideen',
@@ -50,6 +53,8 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'label.orphan': 'Verwaist',
   'label.replies': 'Antworten',
   'label.select': 'Eintrag auswählen',
+  'label.publishingHint':
+    'Veröffentlichen auf QDN — dies kann einen Moment dauern, während das Netzwerk bestätigt.',
   'status.completed': 'Abgeschlossen',
   'status.copied': 'Kopiert',
   'status.noName': 'Kein Name',
@@ -57,6 +62,7 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'status.locked': 'Gesperrt',
   'status.open': 'Offen',
   'status.ready': 'Bereit',
+  'status.publishing': 'Veröffentlichen…',
   'time.now': 'Jetzt',
 };
 

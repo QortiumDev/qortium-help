@@ -3,6 +3,7 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
   Circle,
   Check,
   Edit3,
@@ -16,6 +17,7 @@ import {
   Reply,
   RotateCcw,
   Save,
+  Search,
   Send,
   Trash2,
   X,
@@ -69,6 +71,10 @@ const emptyBridgeState: BridgeState = {
 };
 
 const FILTERS: FeedFilter[] = ['all', 'open', 'completed', 'issue', 'idea', 'orphan'];
+
+// How many feed items to render before the "Load more" affordance, and how many
+// each click reveals — keeps the rendered list bounded as feedback volume grows.
+const FEED_PAGE_SIZE = 25;
 
 // qortium-core and qortium-home aren't published QDN APP resources, so they never
 // come back from the resource search — seed them into the app dropdown explicitly.
@@ -318,10 +324,15 @@ function PostComposer({
             type="submit"
             variant="primary"
           >
-            {publishing ? t('label.loading') : t('action.post')}
+            {publishing ? t('status.publishing') : t('action.post')}
           </CommandButton>
         </div>
       </div>
+      {publishing ? (
+        <p className="composer__hint" role="status">
+          {t('label.publishingHint')}
+        </p>
+      ) : null}
     </form>
   );
 }
@@ -479,7 +490,7 @@ function ReplyComposer({
           type="submit"
           variant="primary"
         >
-          {publishing ? t('label.loading') : t('action.reply')}
+          {publishing ? t('status.publishing') : t('action.reply')}
         </CommandButton>
       </div>
     </form>
@@ -510,6 +521,8 @@ export default function App() {
   const [composer] = useState(getInitialComposerParams);
   const [appNames, setAppNames] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
+  const [search, setSearch] = useState('');
+  const [visibleCount, setVisibleCount] = useState(FEED_PAGE_SIZE);
   const refreshTokenRef = useRef(0);
 
   const t = useMemo(() => createTranslator(displaySettings.language), [displaySettings.language]);
@@ -715,6 +728,29 @@ export default function App() {
         return data.posts;
     }
   }, [data.posts, filter, accountContext.writableNames]);
+
+  const normalizedSearch = search.trim().toLowerCase();
+
+  const searchedPosts = useMemo(() => {
+    if (!normalizedSearch) {
+      return filteredPosts;
+    }
+
+    return filteredPosts.filter((post) => {
+      const haystack = `${post.payload.title} ${post.payload.body} ${post.payload.app ?? ''}`.toLowerCase();
+
+      return haystack.includes(normalizedSearch);
+    });
+  }, [filteredPosts, normalizedSearch]);
+
+  // Reset the visible window whenever the result set changes (filter switch, new
+  // search term, or a refresh) so "Load more" always starts from the top.
+  useEffect(() => {
+    setVisibleCount(FEED_PAGE_SIZE);
+  }, [filter, normalizedSearch, data.posts]);
+
+  const visiblePosts = searchedPosts.slice(0, visibleCount);
+  const hasMorePosts = searchedPosts.length > visiblePosts.length;
 
   const selectedPost = data.posts.find((post) => post.payload.id === selectedPostId) ?? null;
   const selectedComments = selectedPost ? commentsByPostId.get(selectedPost.payload.id) ?? [] : [];
@@ -1215,16 +1251,28 @@ export default function App() {
                   {t('action.newPost')}
                 </CommandButton>
               </div>
+              {filter !== 'orphan' ? (
+                <div className="list-view__search">
+                  <Search aria-hidden="true" />
+                  <input
+                    aria-label={t('field.search')}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={t('field.search')}
+                    type="search"
+                    value={search}
+                  />
+                </div>
+              ) : null}
               <div className="feed-list">
                 {loadState === 'loading' ? <LoadingState text={t('label.loading')} /> : null}
-                {loadState !== 'loading' && filter !== 'orphan' && filter !== 'myApps' && filteredPosts.length === 0 ? (
-                  <EmptyState text={t('empty.posts')} />
+                {loadState !== 'loading' && filter !== 'orphan' && filter !== 'myApps' && searchedPosts.length === 0 ? (
+                  <EmptyState text={normalizedSearch ? t('empty.search') : t('empty.posts')} />
                 ) : null}
-                {loadState !== 'loading' && filter === 'myApps' && filteredPosts.length === 0 ? (
-                  <EmptyState text={t('empty.myApps')} />
+                {loadState !== 'loading' && filter === 'myApps' && searchedPosts.length === 0 ? (
+                  <EmptyState text={normalizedSearch ? t('empty.search') : t('empty.myApps')} />
                 ) : null}
                 {filter !== 'orphan' && filter !== 'myApps'
-                  ? filteredPosts.map((post) => (
+                  ? visiblePosts.map((post) => (
                       <FeedItem
                         commentCount={commentsByPostId.get(post.payload.id)?.length ?? 0}
                         key={post.identifier}
@@ -1234,9 +1282,19 @@ export default function App() {
                       />
                     ))
                   : null}
+                {filter !== 'orphan' && filter !== 'myApps' && hasMorePosts ? (
+                  <div className="load-more">
+                    <CommandButton
+                      icon={<ChevronDown aria-hidden="true" />}
+                      onClick={() => setVisibleCount((count) => count + FEED_PAGE_SIZE)}
+                    >
+                      {t('action.loadMore')}
+                    </CommandButton>
+                  </div>
+                ) : null}
                 {filter === 'myApps'
                   ? Array.from(
-                      filteredPosts.reduce((map, post) => {
+                      searchedPosts.reduce((map, post) => {
                         const appName = post.payload.app!;
                         const group = map.get(appName) ?? [];
 

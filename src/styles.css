@@ -1039,3 +1039,21 @@ textarea:focus {
     width: 100%;
   }
 }
+
+/* a11y-1: visible keyboard focus indicator. The base rules set `outline: none`
+   on inputs, command/icon buttons, segmented toggles, filter items and feed
+   items, leaving keyboard users with no focus cue. Restore a consistent accent
+   ring for keyboard (and other non-pointer) focus across every interactive
+   control. Placed last so it wins over the earlier `outline: none` declarations. */
+:focus-visible {
+  outline: 2px solid var(--qh-accent);
+  outline-offset: 2px;
+}
+
+/* Text fields already render an accent border + ring on focus, so keep the
+   keyboard outline tight against the field rather than floating off it. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline-offset: 0;
+}

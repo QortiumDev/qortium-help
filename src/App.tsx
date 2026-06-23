@@ -23,6 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import helpIconUrl from './assets/qortium-help-protoicon-black-transparent.png';
+import { Avatar } from './Avatar';
 import { createTranslator } from './i18n';
 import { copyTextToClipboard } from './clipboard';
 import { buildPostLink, getInitialComposerParams, getInitialPostId } from './deepLink';
@@ -364,6 +365,7 @@ function FeedItem({
           {post.payload.app ? <span className="app-pill">{post.payload.app}</span> : null}
         </span>
         <span className="feed-item__meta">
+          <Avatar name={post.ownerName} size={18} />
           {getDisplayName(post.ownerName)} · {formatRelativeTime(post.updated)}
           {edited ? ` · ${t('label.edited')}` : ''}
           {completed ? ` · ${t('status.completed')}` : ''}
@@ -405,6 +407,7 @@ function CommentView({
   return (
     <article className="comment">
       <div className="comment__meta">
+        <Avatar name={comment.ownerName} size={24} />
         <span>{getDisplayName(comment.ownerName)}</span>
         <span>{formatRelativeTime(comment.updated)}</span>
         {comment.payload.updatedAt > comment.payload.createdAt ? <span>{t('label.edited')}</span> : null}
@@ -1111,6 +1114,7 @@ export default function App() {
                     </div>
                     <h2>{selectedPost.payload.title}</h2>
                     <div className="post-detail__meta">
+                      <Avatar name={selectedPost.ownerName} size={28} />
                       <span>{getDisplayName(selectedPost.ownerName)}</span>
                       <span>{formatRelativeTime(selectedPost.updated)}</span>
                       {selectedPost.payload.updatedAt > selectedPost.payload.createdAt ? <span>{t('label.edited')}</span> : null}
@@ -1328,6 +1332,7 @@ export default function App() {
                         <span className="feed-item__body">
                           <span className="feed-item__title">{t('label.deletedPost')}</span>
                           <span className="feed-item__meta">
+                            <Avatar name={comment.ownerName} size={18} />
                             {getDisplayName(comment.ownerName)} · {formatRelativeTime(comment.updated)}
                           </span>
                         </span>

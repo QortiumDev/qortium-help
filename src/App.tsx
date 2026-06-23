@@ -1107,6 +1107,9 @@ export default function App() {
           <IconButton disabled={busy || loadState === 'loading'} label={t('action.refresh')} onClick={() => void refreshAll()}>
             <RefreshCw aria-hidden="true" />
           </IconButton>
+          <CommandButton disabled={busy} icon={<Plus aria-hidden="true" />} onClick={openComposer} variant="primary">
+            {t('action.newPost')}
+          </CommandButton>
         </div>
       </header>
 
@@ -1383,9 +1386,6 @@ export default function App() {
             <div className="list-view">
               <div className="list-view__head">
                 <h2 className="list-view__title">{getFilterLabel(filter)}</h2>
-                <CommandButton disabled={busy} icon={<Plus aria-hidden="true" />} onClick={openComposer} variant="primary">
-                  {t('action.newPost')}
-                </CommandButton>
               </div>
               {filter !== 'orphan' ? (
                 <div className="list-view__search">

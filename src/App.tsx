@@ -29,7 +29,7 @@ import { createTranslator } from './i18n';
 import { copyTextToClipboard } from './clipboard';
 import { buildPostLink, getInitialComposerParams, getInitialPostId } from './deepLink';
 import { applyDisplaySettings, getDisplaySettingsUpdateFromMessage, getInitialDisplaySettings } from './displaySettings';
-import { renderFeedbackText } from './feedbackLinks';
+import { openAppLinkInHomeTab, renderFeedbackText } from './feedbackLinks';
 import { getBridgeState, hasAction } from './qdnRequest';
 import {
   canOwnResource,
@@ -54,6 +54,8 @@ import type { BridgeState, QdnAction } from './types';
 
 type LoadState = 'error' | 'loading' | 'ready';
 type FeedFilter = 'all' | 'completed' | 'idea' | 'issue' | 'myApps' | 'open' | 'orphan';
+type SortOrder = 'active' | 'newest' | 'oldest' | 'replies';
+const SORT_ORDERS: SortOrder[] = ['active', 'newest', 'oldest', 'replies'];
 type MainView = 'compose' | 'detail' | 'list';
 
 type FeedbackData = {
@@ -199,6 +201,62 @@ function CommandButton({
       {icon}
       <span>{children}</span>
     </button>
+  );
+}
+
+function ConfirmDialog({
+  busy,
+  message,
+  onCancel,
+  onConfirm,
+  t,
+}: {
+  busy: boolean;
+  message: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+  t: ReturnType<typeof createTranslator>;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onCancel();
+      }
+    }
+
+    window.addEventListener('keydown', handleKey);
+
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onCancel]);
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div
+        aria-labelledby="confirm-dialog-message"
+        aria-modal="true"
+        className="modal"
+        onClick={(event) => event.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <p className="modal__body" id="confirm-dialog-message">
+          {message}
+        </p>
+        <div className="button-row button-row--end">
+          <CommandButton disabled={busy} icon={<X aria-hidden="true" />} onClick={onCancel}>
+            {t('action.cancel')}
+          </CommandButton>
+          <CommandButton disabled={busy} icon={<Trash2 aria-hidden="true" />} onClick={onConfirm} variant="danger">
+            {t('action.delete')}
+          </CommandButton>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -532,6 +590,8 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [copyFallback, setCopyFallback] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortOrder>('active');
+  const [pendingDelete, setPendingDelete] = useState<FeedbackResource | null>(null);
   const [visibleCount, setVisibleCount] = useState(FEED_PAGE_SIZE);
   const refreshTokenRef = useRef(0);
 
@@ -759,14 +819,31 @@ export default function App() {
     });
   }, [filteredPosts, normalizedSearch]);
 
+  const sortedPosts = useMemo(() => {
+    const posts = [...searchedPosts];
+
+    switch (sort) {
+      case 'newest':
+        return posts.sort((a, b) => b.payload.createdAt - a.payload.createdAt);
+      case 'oldest':
+        return posts.sort((a, b) => a.payload.createdAt - b.payload.createdAt);
+      case 'replies':
+        return posts.sort(
+          (a, b) => (commentsByPostId.get(b.payload.id)?.length ?? 0) - (commentsByPostId.get(a.payload.id)?.length ?? 0),
+        );
+      default:
+        return posts.sort((a, b) => b.updated - a.updated);
+    }
+  }, [searchedPosts, sort, commentsByPostId]);
+
   // Reset the visible window whenever the result set changes (filter switch, new
-  // search term, or a refresh) so "Load more" always starts from the top.
+  // search term, sort change, or a refresh) so "Load more" always starts at the top.
   useEffect(() => {
     setVisibleCount(FEED_PAGE_SIZE);
-  }, [filter, normalizedSearch, data.posts]);
+  }, [filter, normalizedSearch, sort, data.posts]);
 
-  const visiblePosts = searchedPosts.slice(0, visibleCount);
-  const hasMorePosts = searchedPosts.length > visiblePosts.length;
+  const visiblePosts = sortedPosts.slice(0, visibleCount);
+  const hasMorePosts = sortedPosts.length > visiblePosts.length;
 
   const selectedPost = data.posts.find((post) => post.payload.id === selectedPostId) ?? null;
   const selectedComments = selectedPost ? commentsByPostId.get(selectedPost.payload.id) ?? [] : [];
@@ -980,6 +1057,7 @@ export default function App() {
       }
 
       await deleteFeedbackResource(resource);
+      setPendingDelete(null);
       await refreshFeedback();
       if (resource.payload.kind === 'post') {
         setSelectedPostId(null);
@@ -989,6 +1067,19 @@ export default function App() {
       setLoadError(getErrorMessage(error, t('error.delete')));
     } finally {
       setBusy(false);
+    }
+  }
+
+  function getSortLabel(value: SortOrder) {
+    switch (value) {
+      case 'newest':
+        return t('sort.newest');
+      case 'oldest':
+        return t('sort.oldest');
+      case 'replies':
+        return t('sort.replies');
+      default:
+        return t('sort.active');
     }
   }
 
@@ -1145,7 +1236,21 @@ export default function App() {
                       <span>{getDisplayName(selectedPost.ownerName)}</span>
                       <span>{formatRelativeTime(selectedPost.updated)}</span>
                       {selectedPost.payload.updatedAt > selectedPost.payload.createdAt ? <span>{t('label.edited')}</span> : null}
-                      {selectedPost.payload.app ? <span className="app-pill">{selectedPost.payload.app}</span> : null}
+                      {selectedPost.payload.app ? (
+                        <button
+                          aria-label={`${t('action.openApp')}: ${selectedPost.payload.app}`}
+                          className="app-pill app-pill--button"
+                          onClick={() => {
+                            void openAppLinkInHomeTab(`qdn://APP/${selectedPost.payload.app}`).catch((error) => {
+                              console.warn('Unable to open app.', error);
+                            });
+                          }}
+                          title={t('action.openApp')}
+                          type="button"
+                        >
+                          {selectedPost.payload.app}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                   {canPublishResource && canOwnResource(selectedPost, accountContext.writableNames) ? (
@@ -1168,7 +1273,7 @@ export default function App() {
                       <IconButton
                         disabled={busy || !canDelete}
                         label={t('action.delete')}
-                        onClick={() => void handleDelete(selectedPost)}
+                        onClick={() => setPendingDelete(selectedPost)}
                         variant="danger"
                       >
                         <Trash2 aria-hidden="true" />
@@ -1265,7 +1370,7 @@ export default function App() {
                         setCommentEditId(null);
                         setCommentEditBody('');
                       }}
-                      onDelete={() => void handleDelete(comment)}
+                      onDelete={() => setPendingDelete(comment)}
                       onEditValueChange={setCommentEditBody}
                       onSaveEdit={() => void saveCommentEdit(comment)}
                       onStartEdit={() => startCommentEdit(comment)}
@@ -1296,6 +1401,18 @@ export default function App() {
                     type="search"
                     value={search}
                   />
+                  <select
+                    aria-label={t('label.sort')}
+                    className="sort-select"
+                    onChange={(event) => setSort(event.target.value as SortOrder)}
+                    value={sort}
+                  >
+                    {SORT_ORDERS.map((value) => (
+                      <option key={value} value={value}>
+                        {getSortLabel(value)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               ) : null}
               <div className="feed-list">
@@ -1329,7 +1446,7 @@ export default function App() {
                 ) : null}
                 {filter === 'myApps'
                   ? Array.from(
-                      searchedPosts.reduce((map, post) => {
+                      sortedPosts.reduce((map, post) => {
                         const appName = post.payload.app!;
                         const group = map.get(appName) ?? [];
 
@@ -1379,6 +1496,16 @@ export default function App() {
       <div aria-hidden="true" className="app-watermark">
         <CheckCircle2 />
       </div>
+
+      {pendingDelete ? (
+        <ConfirmDialog
+          busy={busy}
+          message={t('confirm.delete')}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => void handleDelete(pendingDelete)}
+          t={t}
+        />
+      ) : null}
     </main>
   );
 }

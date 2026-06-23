@@ -473,9 +473,11 @@ export async function loadPublishedAppNames(): Promise<string[]> {
 
   try {
     for (let page = 0; page < APP_NAMES_MAX_PAGES; page += 1) {
+      // Qortium apps are published under a named identifier (e.g. APP/Help/Help),
+      // not the default (empty) identifier, so do NOT filter on `default` — that
+      // excludes every real app and leaves only the hardcoded extras.
       const resources = await qdnRequest<unknown>({
         action: 'LIST_QDN_RESOURCES',
-        default: true,
         includeMetadata: false,
         includeStatus: false,
         limit: APP_NAMES_PAGE_SIZE,

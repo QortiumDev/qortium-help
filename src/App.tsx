@@ -528,6 +528,14 @@ export default function App() {
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
+      // Only trust messages from the embedding Home window. Inside Home this app
+      // runs in an iframe whose source is `window.parent`; in the standalone
+      // browser fallback there is no embedder (`window.parent === window`) and no
+      // legitimate poster, so messages from any other frame are ignored (sec-1).
+      if (event.source !== window.parent) {
+        return;
+      }
+
       setDisplaySettings((current) => getDisplaySettingsUpdateFromMessage(event.data, current) ?? current);
 
       if (isSelectedAccountChangedMessage(event.data)) {
@@ -989,11 +997,19 @@ export default function App() {
             ))}
           </nav>
 
-          {accountError ? <div className="notice">{accountError}</div> : null}
+          {accountError ? (
+            <div aria-live="polite" className="notice" role="status">
+              {accountError}
+            </div>
+          ) : null}
         </aside>
 
         <section className="main-panel">
-          {loadError ? <div className="notice notice--error">{loadError}</div> : null}
+          {loadError ? (
+            <div className="notice notice--error" role="alert">
+              {loadError}
+            </div>
+          ) : null}
 
           {view === 'compose' ? (
             <PostComposer
@@ -1023,6 +1039,9 @@ export default function App() {
                   >
                     {copied ? t('status.copied') : t('action.copyLink')}
                   </CommandButton>
+                  <span aria-live="polite" className="sr-only" role="status">
+                    {copied ? t('status.copied') : ''}
+                  </span>
                 </div>
               </div>
 

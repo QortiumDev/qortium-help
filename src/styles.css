@@ -1057,3 +1057,52 @@ select:focus-visible,
 textarea:focus-visible {
   outline-offset: 0;
 }
+
+/* Visually-hidden content that stays available to screen readers (used for the
+   "Copied" live-region announcement). */
+.sr-only {
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* a11y-2: respect a reduced-motion preference — stop the loading spinner and
+   neutralise hover/transition motion for users who opt out of animation. */
+@media (prefers-reduced-motion: reduce) {
+  .empty-state--loading .spinner {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* resp-1: enlarge interactive targets to ~44px on touch/coarse pointers
+   (WCAG 2.5.5 / Apple HIG), where the default 38px/30px controls are too small. */
+@media (pointer: coarse) {
+  .command-button,
+  .icon-button,
+  .filter-nav__item {
+    min-height: 44px;
+  }
+
+  .icon-button {
+    width: 44px;
+  }
+
+  .segmented button {
+    min-height: 40px;
+  }
+}

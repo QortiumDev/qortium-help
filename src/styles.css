@@ -64,7 +64,7 @@
   --qh-issue-soft: rgb(208 106 42 / 13%);
   --qh-shadow: 0 1px 2px rgb(35 31 24 / 4%), 0 8px 24px rgb(35 31 24 / 6%);
   --qh-shadow-hover: 0 2px 4px rgb(35 31 24 / 5%), 0 12px 28px rgb(35 31 24 / 9%);
-  --qh-gradient-primary: linear-gradient(180deg, #2c9258 0%, #21824a 58%, #1d7341 100%);
+  --qh-gradient-primary: linear-gradient(180deg, #237843 0%, #21824a 58%, #1d7341 100%);
 
   background: var(--qh-page);
   color: var(--qh-text-primary);
@@ -136,7 +136,8 @@
   --qh-accent-hover: #1e5ec3;
   --qh-accent-soft: rgb(42 121 243 / 10%);
   --qh-accent-ring: rgb(42 121 243 / 20%);
-  --qh-gradient-primary: linear-gradient(180deg, #4d8cf6 0%, #2a79f3 58%, #2167db 100%);
+  /* a11y-contrast-1: #4d8cf6 and #2a79f3 give <4.5:1 with white; gradient shifted darker so white text passes all stops. */
+  --qh-gradient-primary: linear-gradient(180deg, #3568d6 0%, #2563d8 58%, #1f56cc 100%);
 }
 
 :root[data-accent='orange'] {
@@ -145,6 +146,8 @@
   --qh-accent-soft: rgb(222 139 35 / 10%);
   --qh-accent-ring: rgb(222 139 35 / 20%);
   --qh-gradient-primary: linear-gradient(180deg, #f29b33 0%, #de8b23 58%, #c97a1a 100%);
+  /* a11y-contrast-1: orange gradient is too light for white text; use dark text on all stops (8.23/6.77/5.44). */
+  --qh-accent-text: #1e1400;
 }
 
 :root[data-accent='purple'] {
@@ -152,7 +155,8 @@
   --qh-accent-hover: #622fbd;
   --qh-accent-soft: rgb(123 68 218 / 10%);
   --qh-accent-ring: rgb(123 68 218 / 20%);
-  --qh-gradient-primary: linear-gradient(180deg, #9460e3 0%, #7b44da 58%, #6b35c5 100%);
+  /* a11y-contrast-1: #9460e3 start gives only 4.17:1 white; shifted to #8050d5 (5.22:1). */
+  --qh-gradient-primary: linear-gradient(180deg, #8050d5 0%, #7b44da 58%, #6b35c5 100%);
 }
 
 :root[data-accent='red'] {
@@ -160,7 +164,8 @@
   --qh-accent-hover: #b63232;
   --qh-accent-soft: rgb(213 62 62 / 10%);
   --qh-accent-ring: rgb(213 62 62 / 20%);
-  --qh-gradient-primary: linear-gradient(180deg, #e65a5a 0%, #d53e3e 58%, #c52e2e 100%);
+  /* a11y-contrast-1: #e65a5a start gives only 3.51:1 with white; start raised to match mid stop (4.58:1). */
+  --qh-gradient-primary: linear-gradient(180deg, #d53e3e 0%, #d53e3e 58%, #c52e2e 100%);
 }
 
 :root[data-accent='teal'] {
@@ -169,6 +174,8 @@
   --qh-accent-soft: rgb(23 163 152 / 10%);
   --qh-accent-ring: rgb(23 163 152 / 20%);
   --qh-gradient-primary: linear-gradient(180deg, #34baad 0%, #17a398 58%, #138f87 100%);
+  /* a11y-contrast-1: teal gradient is too light for white text; dark text passes all stops (7.59/5.82/4.59). */
+  --qh-accent-text: #1e1400;
 }
 
 :root[data-accent='cyan'] {
@@ -176,7 +183,10 @@
   --qh-accent-hover: #0f79aa;
   --qh-accent-soft: rgb(18 152 216 / 10%);
   --qh-accent-ring: rgb(18 152 216 / 20%);
-  --qh-gradient-primary: linear-gradient(180deg, #2aa8e4 0%, #1298d8 58%, #0e82c2 100%);
+  /* a11y-contrast-1: cyan is too light for white text; dark text added and darkest gradient stop
+     lightened (#0e82c2 → #0d8ec7) so dark text passes all stops (6.77/5.63/4.94). */
+  --qh-gradient-primary: linear-gradient(180deg, #2aa8e4 0%, #1298d8 58%, #0d8ec7 100%);
+  --qh-accent-text: #1e1400;
 }
 
 :root[data-accent='pink'] {
@@ -184,7 +194,9 @@
   --qh-accent-hover: #bd3673;
   --qh-accent-soft: rgb(212 63 134 / 10%);
   --qh-accent-ring: rgb(212 63 134 / 20%);
-  --qh-gradient-primary: linear-gradient(180deg, #e15fa0 0%, #d43f86 58%, #c43578 100%);
+  /* a11y-contrast-1: #e15fa0 start gives only 3.31:1 with white; entire gradient range shifted to
+     darker shades where white text passes all stops (4.92/5.09/5.80). */
+  --qh-gradient-primary: linear-gradient(180deg, #c53a7c 0%, #c43578 58%, #b82d6a 100%);
 }
 
 :root[data-accent='yellow'] {
@@ -297,6 +309,39 @@ textarea:disabled {
   opacity: 0.65;
 }
 
+/* a11y-contrast-2: global opacity:0.65 blends the whole element against its backdrop, which
+   reduces effective text-vs-bg contrast below 4.5:1 for primary and ghost icon buttons.
+   The fix: override primary disabled to a neutral greyed background + legible text at
+   full-element opacity:1 (disabled state is still clearly conveyed by the greyed style +
+   cursor:not-allowed). Ghost icon-button inherits opacity:0.65 but its text-secondary-on-
+   control contrast is sufficient at that opacity (dark theme effective ≈4.87; light ≈3.06
+   is improved by the higher-contrast text below). */
+.command-button--primary:disabled,
+.icon-button--primary:disabled {
+  background: var(--qh-control);
+  border-color: var(--qh-border);
+  color: var(--qh-text-secondary);
+  opacity: 1;
+}
+
+.command-button--danger:disabled,
+.icon-button--danger:disabled {
+  /* a11y-contrast-2: avoid red-tinted full-opacity fades on disabled actions; neutral background + readable
+     text keeps affordance visible while still clearly disabled via `disabled`. */
+  background: var(--qh-control);
+  border-color: var(--qh-border);
+  color: var(--qh-text-secondary);
+  opacity: 1;
+}
+
+/* a11y-contrast-2: icon-button--ghost (refresh, cancel, etc.) uses color:text-secondary (#44504e)
+   which at opacity:0.65 over a white page gives effective contrast ≈3.06 — below 4.5:1.
+   Raising to text-primary (#18201f) at 0.65 yields effective ≈4.67 (light) / 6.10 (dark).
+   Scoped to ghost only so danger-variant disabled keeps its red colour for semantics. */
+.icon-button--ghost:disabled {
+  color: var(--qh-text-primary);
+}
+
 svg {
   display: block;
   flex: 0 0 auto;
@@ -335,19 +380,21 @@ svg {
 
 .brand__mark {
   align-items: center;
-  background: var(--qh-accent-soft);
-  border: 1px solid var(--qh-accent-ring);
-  border-radius: var(--qh-radius);
   display: inline-flex;
-  height: 42px;
+  height: 44px;
   justify-content: center;
-  width: 42px;
+  width: 44px;
 }
 
 .brand__mark img {
   display: block;
-  height: 34px;
-  width: 34px;
+  height: 44px;
+  object-fit: contain;
+  width: 44px;
+}
+
+:root[data-theme='light'] .brand__mark img {
+  filter: invert(1);
 }
 
 .brand h1 {
@@ -479,13 +526,16 @@ svg {
 .filter-nav__item.is-selected {
   background: var(--qh-accent-soft);
   border-color: var(--qh-accent-ring);
-  color: var(--qh-accent);
+  /* a11y-contrast-1: accent on accent-soft-over-rail fails 4.5:1 across all accent/theme combos
+     (green 3.47, orange 2.02, yellow 1.70). Selected state is conveyed by bg+border ring; label
+     text uses text-primary for guaranteed readability (≥11:1 on any soft tint). */
+  color: var(--qh-text-primary);
 }
 
 .filter-nav__item.is-selected .count-pill {
   background: var(--qh-accent-soft);
   border-color: var(--qh-accent-ring);
-  color: var(--qh-accent);
+  color: var(--qh-text-primary);
 }
 
 .account-strip,
@@ -681,7 +731,9 @@ textarea:focus {
 .status-pill--good {
   background: var(--qh-accent-soft);
   border-color: var(--qh-accent-ring);
-  color: var(--qh-accent);
+  /* a11y-contrast-1: accent colour on accent-soft fails 4.5:1 for all accent variants in light theme
+     (e.g. green 4.22, orange 2.45, yellow 2.05). text-primary guarantees ≥14:1 on any soft tint. */
+  color: var(--qh-text-primary);
 }
 
 .status-pill--warn {
@@ -880,7 +932,10 @@ textarea:focus {
   background: var(--qh-accent-soft);
   border: 1px solid var(--qh-accent-ring);
   border-radius: var(--qh-radius-sm);
-  color: var(--qh-accent);
+  /* a11y-contrast-1: accent colour on accent-soft fails 4.5:1 for small text across all accent
+     variants in light theme (green 4.22, blue 3.63, orange 2.45, yellow 2.05). text-primary
+     guarantees ≥14:1. Tinted bg still communicates the accent category; text needs to be legible. */
+  color: var(--qh-text-primary);
   display: inline-block;
   flex: none;
   font-size: calc(var(--qh-text-small) * 0.92);
@@ -921,12 +976,16 @@ textarea:focus {
 
 .kind-mark--issue {
   background: var(--qh-issue-soft);
-  color: var(--qh-issue);
+  /* a11y-contrast-3: issue icon uses #d06a2a on a soft, light-α bg and reads at 3.13:1 (light theme).
+     Use high-contrast text for AA compliance while keeping the badge color coding. */
+  color: var(--qh-text-primary);
 }
 
 .kind-mark--idea {
   background: var(--qh-idea-soft);
-  color: var(--qh-idea);
+  /* a11y-contrast-3: idea icon reads at 4.22:1 on light backgrounds; color-primary resolves it to
+     14.58+:1 against the same soft bg in both themes. */
+  color: var(--qh-text-primary);
 }
 
 .kind-mark--orphan {
@@ -961,14 +1020,18 @@ textarea:focus {
 }
 
 .post-detail__kind {
-  color: var(--qh-accent);
+  /* a11y-contrast-1: accent colour on white surface fails 4.5:1 for small/uppercase text across
+     several light-theme variants (orange 2.68, yellow 2.21, teal 3.12, cyan 3.23, blue 4.10).
+     text-primary guarantees ≥11:1 on any surface. Dark-theme accents already pass individually
+     but text-primary is still correct there (contrast ≫ 4.5). */
+  color: var(--qh-text-primary);
   font-size: var(--qh-text-small);
   font-weight: 800;
   text-transform: uppercase;
 }
 
 .app-link {
-  color: var(--qh-accent);
+  color: var(--qh-text-secondary);
   font-weight: 600;
   overflow-wrap: anywhere;
   text-decoration: underline;
@@ -976,7 +1039,7 @@ textarea:focus {
 }
 
 .app-link:hover {
-  color: var(--qh-accent-hover);
+  color: var(--qh-text-primary);
 }
 
 .post-detail h2 {

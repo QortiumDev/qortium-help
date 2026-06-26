@@ -2,16 +2,19 @@ import { isRtlLanguage, normalizeLanguage as normalizeSupportedLanguage, type Su
 
 export const TEXT_SIZE_VALUES = ['extra-small', 'small', 'medium', 'large', 'extra-large', 'huge'] as const;
 export const ACCENT_OPTIONS = ['green', 'blue', 'orange', 'purple', 'red', 'teal', 'cyan', 'pink', 'yellow'] as const;
+export const UI_STYLE_OPTIONS = ['classic', 'modern'] as const;
 
 export type QdnTheme = 'dark' | 'light';
 export type QdnTextSize = (typeof TEXT_SIZE_VALUES)[number];
 export type QdnAccent = (typeof ACCENT_OPTIONS)[number];
+export type QdnUiStyle = (typeof UI_STYLE_OPTIONS)[number];
 
 export type QdnDisplaySettings = {
   accent: QdnAccent;
   language: SupportedLanguage;
   textSize: QdnTextSize;
   theme: QdnTheme;
+  uiStyle: QdnUiStyle;
 };
 
 type QdnHostWindow = Window & {
@@ -20,6 +23,8 @@ type QdnHostWindow = Window & {
   _qdnLanguage?: unknown;
   _qdnTextSize?: unknown;
   _qdnTheme?: unknown;
+  _qdnUiStyle?: unknown;
+  _qdnUIStyle?: unknown;
 };
 
 const DEFAULT_DISPLAY_SETTINGS: QdnDisplaySettings = {
@@ -27,6 +32,7 @@ const DEFAULT_DISPLAY_SETTINGS: QdnDisplaySettings = {
   language: 'en',
   textSize: 'medium',
   theme: 'light',
+  uiStyle: 'classic',
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -67,6 +73,16 @@ export function normalizeAccent(value: unknown): QdnAccent | null {
   return ACCENT_OPTIONS.includes(normalized as QdnAccent) ? (normalized as QdnAccent) : null;
 }
 
+export function normalizeUiStyle(value: unknown): QdnUiStyle | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  return UI_STYLE_OPTIONS.includes(normalized as QdnUiStyle) ? (normalized as QdnUiStyle) : null;
+}
+
 export function getInitialDisplaySettings(): QdnDisplaySettings {
   const hostWindow = typeof window === 'undefined' ? null : (window as QdnHostWindow);
   const query = typeof window === 'undefined' ? null : new URLSearchParams(window.location?.search ?? '');
@@ -81,6 +97,9 @@ export function getInitialDisplaySettings(): QdnDisplaySettings {
       normalizeTextSize(hostWindow?._qdnTextSize) ??
       DEFAULT_DISPLAY_SETTINGS.textSize,
     theme: normalizeTheme(query?.get('theme') ?? hostWindow?._qdnTheme) ?? DEFAULT_DISPLAY_SETTINGS.theme,
+    uiStyle:
+      normalizeUiStyle(query?.get('uiStyle') ?? query?.get('ui-style') ?? hostWindow?._qdnUiStyle ?? hostWindow?._qdnUIStyle) ??
+      DEFAULT_DISPLAY_SETTINGS.uiStyle,
   };
 }
 
@@ -95,6 +114,7 @@ export function applyDisplaySettings(settings: QdnDisplaySettings) {
   root.dataset.language = settings.language;
   root.dataset.textSize = settings.textSize;
   root.dataset.theme = settings.theme;
+  root.dataset.ui = settings.uiStyle;
   root.dir = isRtlLanguage(settings.language) ? 'rtl' : 'ltr';
   root.lang = settings.language;
   root.style.colorScheme = settings.theme;
@@ -105,6 +125,10 @@ export function getDisplaySettingsUpdateFromMessage(
   current: QdnDisplaySettings,
 ): QdnDisplaySettings | null {
   if (!isObject(data) || typeof data.action !== 'string') {
+    return null;
+  }
+
+  if ('requestedHandler' in data && data.requestedHandler !== 'UI') {
     return null;
   }
 
@@ -120,6 +144,7 @@ export function getDisplaySettingsUpdateFromMessage(
         language: normalizeLanguage(data.language ?? data.lang ?? data.qdnLang) ?? current.language,
         textSize: normalizeTextSize(data.textSize ?? data.qdnTextSize) ?? current.textSize,
         theme: normalizeTheme(data.theme ?? data.qdnTheme) ?? current.theme,
+        uiStyle: normalizeUiStyle(data.uiStyle ?? data.ui ?? data.qdnUiStyle ?? data.qdnUIStyle) ?? current.uiStyle,
       };
     }
     case 'LANGUAGE_CHANGED': {
@@ -136,6 +161,11 @@ export function getDisplaySettingsUpdateFromMessage(
       const theme = normalizeTheme(data.theme ?? data.qdnTheme);
 
       return theme ? { ...current, theme } : null;
+    }
+    case 'UI_STYLE_CHANGED': {
+      const uiStyle = normalizeUiStyle(data.uiStyle ?? data.ui ?? data.qdnUiStyle ?? data.qdnUIStyle);
+
+      return uiStyle ? { ...current, uiStyle } : null;
     }
     default:
       return null;

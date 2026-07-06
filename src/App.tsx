@@ -573,7 +573,7 @@ export default function App() {
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FeedFilter>('all');
-  const [view, setView] = useState<MainView>('list');
+  const [view, setView] = useState<MainView>(() => getInitialComposerParams().app ? 'compose' : 'list');
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [publishName, setPublishName] = useState('');
   const [busy, setBusy] = useState(false);

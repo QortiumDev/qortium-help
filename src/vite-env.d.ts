@@ -12,4 +12,6 @@ interface Window {
   _qdnLanguage?: unknown;
   _qdnTextSize?: unknown;
   _qdnTheme?: unknown;
+  _qdnUiStyle?: unknown;
+  _qdnUIStyle?: unknown;
 }

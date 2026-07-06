@@ -7,6 +7,14 @@
 }
 
 @font-face {
+  font-family: "Inter";
+  font-display: swap;
+  font-style: normal;
+  font-weight: 100 900;
+  src: url("./assets/fonts/inter/inter-latin-wght-normal.woff2") format("woff2");
+}
+
+@font-face {
   font-family: "Illinois Mono";
   font-display: swap;
   font-style: normal;
@@ -270,6 +278,40 @@
   --qh-accent-text: #2f2100;
   --qh-accent-soft: rgb(244 203 103 / 12%);
   --qh-accent-ring: rgb(244 203 103 / 20%);
+}
+
+:root[data-ui='modern'] {
+  --qh-page: #f2efe6;
+  --qh-rail: #f2efe6;
+  --qh-surface: #ffffff;
+  --qh-surface-alt: #f7f4ec;
+  --qh-control: #f7f4ec;
+  --qh-control-hover: #ddd9d0;
+  --qh-border: #ddd9d0;
+  --qh-border-strong: #ddd9d0;
+  --qh-text-primary: #0d0d0d;
+  --qh-text-secondary: #6b6b6b;
+  --qh-muted: #6b6b6b;
+  --qh-shadow: none;
+  --qh-shadow-hover: 0 0 0 1.5px var(--qh-border);
+
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:root[data-theme='dark'][data-ui='modern'] {
+  --qh-page: #111318;
+  --qh-rail: #111318;
+  --qh-surface: #1c1f28;
+  --qh-surface-alt: #222633;
+  --qh-control: #222633;
+  --qh-control-hover: #2e3340;
+  --qh-border: #2e3340;
+  --qh-border-strong: #2e3340;
+  --qh-text-primary: #e4e8f0;
+  --qh-text-secondary: #8892a4;
+  --qh-muted: #6f7a8c;
+  --qh-shadow: none;
+  --qh-shadow-hover: 0 0 0 1.5px var(--qh-border);
 }
 
 * {
@@ -1335,6 +1377,139 @@ textarea:focus-visible {
   font-size: var(--qh-text-small);
   margin: 0;
   padding: 0 12px 12px;
+}
+
+:root[data-ui='modern'] body {
+  background: var(--qh-page);
+}
+
+:root[data-ui='modern'] .topbar {
+  background: var(--qh-surface);
+  border-bottom: 1.5px solid var(--qh-border);
+  box-shadow: none;
+  min-height: 52px;
+  padding-block: 8px;
+}
+
+:root[data-ui='modern'] .brand {
+  gap: 10px;
+}
+
+:root[data-ui='modern'] .brand__mark,
+:root[data-ui='modern'] .brand__mark img {
+  height: 34px;
+  width: 34px;
+}
+
+:root[data-ui='modern'] .brand h1 {
+  font-size: calc(18px * var(--qh-scale));
+  line-height: 1.15;
+}
+
+:root[data-ui='modern'] .workspace {
+  background: var(--qh-page);
+  gap: 16px;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  margin-inline: auto;
+  padding: 32px;
+  width: min(100%, 56.25em);
+}
+
+:root[data-ui='modern'] .sidebar,
+:root[data-ui='modern'] .main-panel {
+  min-height: 0;
+}
+
+:root[data-ui='modern'] .sidebar {
+  background: var(--qh-surface);
+  border: 1.5px solid var(--qh-border);
+  border-radius: var(--qh-radius);
+}
+
+:root[data-ui='modern'] .main-panel {
+  padding: 0;
+}
+
+:root[data-ui='modern'] .account-strip,
+:root[data-ui='modern'] .composer,
+:root[data-ui='modern'] .post-detail,
+:root[data-ui='modern'] .comments-panel,
+:root[data-ui='modern'] .feed-item,
+:root[data-ui='modern'] .comment,
+:root[data-ui='modern'] .modal,
+:root[data-ui='modern'] .empty-state {
+  border-width: 1.5px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+:root[data-ui='modern'] input,
+:root[data-ui='modern'] select,
+:root[data-ui='modern'] textarea,
+:root[data-ui='modern'] .segmented,
+:root[data-ui='modern'] .attachment,
+:root[data-ui='modern'] .app-pill,
+:root[data-ui='modern'] .notice {
+  border-width: 1.5px;
+  border-radius: 8px;
+}
+
+:root[data-ui='modern'] .command-button,
+:root[data-ui='modern'] .icon-button,
+:root[data-ui='modern'] .filter-nav__item {
+  border-width: 1.5px;
+  border-radius: 50px;
+}
+
+:root[data-ui='modern'] .segmented {
+  padding: 4px;
+}
+
+:root[data-ui='modern'] .segmented button {
+  border-radius: 50px;
+}
+
+:root[data-ui='modern'] .segmented button.is-selected {
+  box-shadow: none;
+}
+
+:root[data-ui='modern'] .feed-item:not(.feed-item--orphan):hover {
+  box-shadow: 0 0 0 1.5px var(--qh-accent-ring);
+}
+
+:root[data-ui='modern'] .app-group__label {
+  background: var(--qh-surface-alt);
+}
+
+:root[data-ui='modern'] .modal-overlay {
+  background: rgb(13 13 13 / 38%);
+}
+
+:root[data-theme='dark'][data-ui='modern'] .modal-overlay {
+  background: rgb(0 0 0 / 45%);
+}
+
+@media (max-width: 920px) {
+  :root[data-ui='modern'] .workspace {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  :root[data-ui='modern'] .sidebar {
+    border: 1.5px solid var(--qh-border);
+  }
+}
+
+@media (max-width: 620px) {
+  :root[data-ui='modern'] .topbar {
+    min-height: 0;
+  }
+
+  :root[data-ui='modern'] .workspace {
+    padding: 16px;
+    width: 100%;
+  }
 }
 
 /* resp-1: enlarge interactive targets to ~44px on touch/coarse pointers

@@ -75,6 +75,7 @@ const emptyBridgeState: BridgeState = {
 };
 
 const FILTERS: FeedFilter[] = ['all', 'open', 'completed', 'issue', 'idea', 'orphan'];
+const APP_VERSION = __APP_VERSION__;
 
 // How many feed items to render before the "Load more" affordance, and how many
 // each click reveals — keeps the rendered list bounded as feedback volume grows.
@@ -1093,7 +1094,10 @@ export default function App() {
             <img src={helpIconUrl} alt="" aria-hidden="true" />
           </span>
           <div>
-            <h1>{t('app.title')}</h1>
+            <div className="brand__title-row">
+              <h1>{t('app.title')}</h1>
+              <span className="app-version">{APP_VERSION}</span>
+            </div>
             <span>{t('label.feedback')}</span>
           </div>
         </div>

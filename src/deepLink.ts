@@ -19,6 +19,8 @@ export const APP_QUERY_PARAM = 'app';
 export const NEW_QUERY_PARAM = 'new';
 export const TYPE_QUERY_PARAM = 'type';
 
+export type InitialFeedFilter = 'all' | 'completed' | 'idea' | 'issue' | 'myApps' | 'open' | 'orphan';
+
 type LocationLike = {
   pathname?: string;
   search?: string;
@@ -104,6 +106,36 @@ export function getInitialAppFilter(search?: string): string | null {
   return value ? value : null;
 }
 
+export function getInitialFeedFilter(search?: string): InitialFeedFilter | null {
+  const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
+  const value = new URLSearchParams(raw).get(TYPE_QUERY_PARAM)?.trim().toLowerCase();
+
+  switch (value) {
+    case 'all':
+    case 'open':
+    case 'issue':
+    case 'idea':
+      return value;
+    case 'completed':
+    case 'done':
+      return 'completed';
+    case 'issues':
+      return 'issue';
+    case 'ideas':
+      return 'idea';
+    case 'my apps':
+    case 'my-apps':
+    case 'my_apps':
+    case 'myapps':
+      return 'myApps';
+    case 'orphan':
+    case 'orphans':
+      return 'orphan';
+    default:
+      return null;
+  }
+}
+
 export type ComposerParams = {
   app: string | null;
   type: FeedbackKind | null;
@@ -115,9 +147,10 @@ export type ComposerParams = {
 export function getInitialComposerParams(search?: string): ComposerParams {
   const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
   const query = new URLSearchParams(raw);
-  const app = query.has(NEW_QUERY_PARAM) ? query.get(NEW_QUERY_PARAM)?.trim() || null : null;
+  const isNewPost = query.has(NEW_QUERY_PARAM);
+  const app = isNewPost ? query.get(NEW_QUERY_PARAM)?.trim() || null : null;
   const rawType = query.get(TYPE_QUERY_PARAM);
-  const type: FeedbackKind | null = rawType === 'issue' || rawType === 'idea' ? rawType : null;
+  const type: FeedbackKind | null = isNewPost && (rawType === 'issue' || rawType === 'idea') ? rawType : null;
 
   return { app, type };
 }

@@ -10,9 +10,9 @@ describe('deep links', () => {
   });
 
   it('reads composer pre-fill params from the query string', () => {
-    expect(getInitialComposerParams('?app=Wallet&type=issue&theme=dark')).toEqual({ app: 'Wallet', type: 'issue' });
-    expect(getInitialComposerParams('?app=Chat&type=idea')).toEqual({ app: 'Chat', type: 'idea' });
-    expect(getInitialComposerParams('?app=%20')).toEqual({ app: null, type: null });
+    expect(getInitialComposerParams('?new=Wallet&type=issue&theme=dark')).toEqual({ app: 'Wallet', type: 'issue' });
+    expect(getInitialComposerParams('?new=Chat&type=idea')).toEqual({ app: 'Chat', type: 'idea' });
+    expect(getInitialComposerParams('?new=%20')).toEqual({ app: null, type: null });
     expect(getInitialComposerParams('?type=bogus')).toEqual({ app: null, type: null });
     expect(getInitialComposerParams('')).toEqual({ app: null, type: null });
   });

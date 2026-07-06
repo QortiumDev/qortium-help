@@ -15,7 +15,7 @@ const DEFAULT_NAME = 'Help';
 const DEFAULT_IDENTIFIER = 'Help';
 
 export const POST_QUERY_PARAM = 'post';
-export const APP_QUERY_PARAM = 'app';
+export const APP_QUERY_PARAM = 'new';
 export const TYPE_QUERY_PARAM = 'type';
 
 type LocationLike = {
@@ -95,7 +95,7 @@ export type ComposerParams = {
   type: FeedbackKind | null;
 };
 
-// A second, independent deep link: `qdn://APP/Help/Help?app=<name>&type=<issue|idea>`
+// A second, independent deep link: `qdn://APP/Help/Help?new=<name>&type=<issue|idea>`
 // pre-fills the composer (which app the feedback is about, and its kind) so other
 // apps can hand off straight into a relevant "file feedback" form. Both params are
 // optional; `type` is only honoured for the two known kinds.

@@ -38,8 +38,10 @@ import {
   buildPostLink,
   getInitialAppFilter,
   getInitialComposerParams,
+  getInitialFeedFilter,
   getInitialNewPostRequested,
   getInitialPostId,
+  type InitialFeedFilter,
 } from './deepLink';
 import { applyDisplaySettings, getDisplaySettingsUpdateFromMessage, getInitialDisplaySettings } from './displaySettings';
 import { openAppLinkInHomeTab, renderFeedbackText } from './feedbackLinks';
@@ -66,7 +68,7 @@ import {
 import type { BridgeState, QdnAction } from './types';
 
 type LoadState = 'error' | 'loading' | 'ready';
-type FeedFilter = 'all' | 'completed' | 'idea' | 'issue' | 'myApps' | 'open' | 'orphan';
+type FeedFilter = InitialFeedFilter;
 type SortOrder = 'active' | 'newest' | 'oldest' | 'replies';
 const SORT_ORDERS: SortOrder[] = ['active', 'newest', 'oldest', 'replies'];
 type MainView = 'compose' | 'detail' | 'list';
@@ -582,12 +584,17 @@ export default function App() {
   const [displaySettings, setDisplaySettings] = useState(getInitialDisplaySettings);
   const [bridgeState, setBridgeState] = useState<BridgeState>(emptyBridgeState);
   const [accountContext, setAccountContext] = useState<AccountContext>({ account: null, writableNames: [] });
+  const [accountLoaded, setAccountLoaded] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [data, setData] = useState<FeedbackData>(emptyData);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FeedFilter>('all');
-  const [selectedAppFilter, setSelectedAppFilter] = useState<AppFilterValue>(() => getInitialAppFilter() ?? APP_FILTER_ALL);
+  const [filter, setFilter] = useState<FeedFilter>(() =>
+    getInitialPostId() || getInitialNewPostRequested() ? 'all' : getInitialFeedFilter() ?? 'all',
+  );
+  const [selectedAppFilter, setSelectedAppFilter] = useState<AppFilterValue>(() =>
+    getInitialPostId() || getInitialNewPostRequested() ? APP_FILTER_ALL : getInitialAppFilter() ?? APP_FILTER_ALL,
+  );
   const [view, setView] = useState<MainView>(() =>
     getInitialPostId() ? 'list' : getInitialNewPostRequested() ? 'compose' : 'list',
   );
@@ -657,6 +664,7 @@ export default function App() {
   }, []);
 
   async function refreshAccount() {
+    setAccountLoaded(false);
     setAccountError(null);
 
     try {
@@ -668,6 +676,8 @@ export default function App() {
       setAccountContext({ account: null, writableNames: [] });
       setPublishName('');
       setAccountError(getErrorMessage(error, t('error.account')));
+    } finally {
+      setAccountLoaded(true);
     }
   }
 
@@ -742,10 +752,10 @@ export default function App() {
   // set empties (e.g. account switch / sign-out) drop back to the default filter
   // so the view doesn't get stranded on a now-hidden tab.
   useEffect(() => {
-    if (filter === 'myApps' && accountContext.writableNames.length === 0) {
+    if (accountLoaded && filter === 'myApps' && accountContext.writableNames.length === 0) {
       setFilter('all');
     }
-  }, [filter, accountContext.writableNames]);
+  }, [accountLoaded, filter, accountContext.writableNames]);
 
   const commentsByPostId = useMemo(() => {
     const map = new Map<string, FeedbackResource<FeedbackCommentPayload>[]>();

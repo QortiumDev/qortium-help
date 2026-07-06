@@ -4,6 +4,7 @@ import {
   getAppBaseAddress,
   getInitialAppFilter,
   getInitialComposerParams,
+  getInitialFeedFilter,
   getInitialNewPostRequested,
   getInitialPostId,
 } from './deepLink';
@@ -34,9 +35,27 @@ describe('deep links', () => {
     expect(getInitialComposerParams('?new=Wallet&type=issue&theme=dark')).toEqual({ app: 'Wallet', type: 'issue' });
     expect(getInitialComposerParams('?new=Chat&type=idea')).toEqual({ app: 'Chat', type: 'idea' });
     expect(getInitialComposerParams('?new&type=idea')).toEqual({ app: null, type: 'idea' });
-    expect(getInitialComposerParams('?app=Wallet&type=issue')).toEqual({ app: null, type: 'issue' });
+    expect(getInitialComposerParams('?new=Wallet&type=open')).toEqual({ app: 'Wallet', type: null });
+    expect(getInitialComposerParams('?app=Wallet&type=issue')).toEqual({ app: null, type: null });
     expect(getInitialComposerParams('?type=bogus')).toEqual({ app: null, type: null });
     expect(getInitialComposerParams('')).toEqual({ app: null, type: null });
+  });
+
+  it('reads feed filter params from the query string', () => {
+    expect(getInitialFeedFilter('?type=all')).toBe('all');
+    expect(getInitialFeedFilter('?type=open')).toBe('open');
+    expect(getInitialFeedFilter('?type=completed')).toBe('completed');
+    expect(getInitialFeedFilter('?type=done')).toBe('completed');
+    expect(getInitialFeedFilter('?app=Wallet&type=issue')).toBe('issue');
+    expect(getInitialFeedFilter('?type=issues')).toBe('issue');
+    expect(getInitialFeedFilter('?type=ideas')).toBe('idea');
+    expect(getInitialFeedFilter('?type=orphans')).toBe('orphan');
+    expect(getInitialFeedFilter('?type=my-apps')).toBe('myApps');
+    expect(getInitialFeedFilter('?type=my_apps')).toBe('myApps');
+    expect(getInitialFeedFilter('?type=myapps')).toBe('myApps');
+    expect(getInitialFeedFilter('?type=my%20apps')).toBe('myApps');
+    expect(getInitialFeedFilter('?type=bogus')).toBeNull();
+    expect(getInitialFeedFilter('')).toBeNull();
   });
 
   it('prefers the identity Core injects as page globals', () => {

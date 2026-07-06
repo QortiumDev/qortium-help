@@ -25,9 +25,22 @@ import {
 import helpIconUrl from './assets/qortium-help-protoicon-black-transparent.png';
 import { AttachmentList } from './attachments';
 import { Avatar } from './Avatar';
+import {
+  APP_FILTER_ALL,
+  buildAppFilterOptions,
+  filterPostsByApp,
+  type AppFilterOption,
+  type AppFilterValue,
+} from './appFilters';
 import { createTranslator } from './i18n';
 import { copyTextToClipboard } from './clipboard';
-import { buildPostLink, getInitialComposerParams, getInitialPostId } from './deepLink';
+import {
+  buildPostLink,
+  getInitialAppFilter,
+  getInitialComposerParams,
+  getInitialNewPostRequested,
+  getInitialPostId,
+} from './deepLink';
 import { applyDisplaySettings, getDisplaySettingsUpdateFromMessage, getInitialDisplaySettings } from './displaySettings';
 import { openAppLinkInHomeTab, renderFeedbackText } from './feedbackLinks';
 import { getBridgeState, hasAction } from './qdnRequest';
@@ -574,7 +587,10 @@ export default function App() {
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FeedFilter>('all');
-  const [view, setView] = useState<MainView>('list');
+  const [selectedAppFilter, setSelectedAppFilter] = useState<AppFilterValue>(() => getInitialAppFilter() ?? APP_FILTER_ALL);
+  const [view, setView] = useState<MainView>(() =>
+    getInitialPostId() ? 'list' : getInitialNewPostRequested() ? 'compose' : 'list',
+  );
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [publishName, setPublishName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -753,11 +769,19 @@ export default function App() {
     () => data.comments.filter((comment) => !postIds.has(comment.payload.postId)),
     [data.comments, postIds],
   );
+  const appFilterOptions = useMemo(
+    () => buildAppFilterOptions(data.posts, selectedAppFilter),
+    [data.posts, selectedAppFilter],
+  );
+  const appFilteredPosts = useMemo(
+    () => filterPostsByApp(data.posts, selectedAppFilter),
+    [data.posts, selectedAppFilter],
+  );
 
   const filterCounts = useMemo(() => {
     const writable = new Set(accountContext.writableNames.map((name) => name.toLowerCase()));
     const counts: Record<FeedFilter, number> = {
-      all: data.posts.length,
+      all: appFilteredPosts.length,
       completed: 0,
       idea: 0,
       issue: 0,
@@ -766,7 +790,7 @@ export default function App() {
       orphan: orphanComments.length,
     };
 
-    for (const post of data.posts) {
+    for (const post of appFilteredPosts) {
       if (post.payload.status === 'done') {
         counts.completed += 1;
       } else {
@@ -785,26 +809,26 @@ export default function App() {
     }
 
     return counts;
-  }, [data.posts, orphanComments.length, accountContext.writableNames]);
+  }, [appFilteredPosts, orphanComments.length, accountContext.writableNames]);
 
   const filteredPosts = useMemo(() => {
     switch (filter) {
       case 'completed':
-        return data.posts.filter((post) => post.payload.status === 'done');
+        return appFilteredPosts.filter((post) => post.payload.status === 'done');
       case 'idea':
       case 'issue':
-        return data.posts.filter((post) => post.payload.type === filter);
+        return appFilteredPosts.filter((post) => post.payload.type === filter);
       case 'open':
-        return data.posts.filter((post) => post.payload.status !== 'done');
+        return appFilteredPosts.filter((post) => post.payload.status !== 'done');
       case 'myApps': {
         const writable = new Set(accountContext.writableNames.map((name) => name.toLowerCase()));
 
-        return data.posts.filter((post) => post.payload.app && writable.has(post.payload.app.toLowerCase()));
+        return appFilteredPosts.filter((post) => post.payload.app && writable.has(post.payload.app.toLowerCase()));
       }
       default:
-        return data.posts;
+        return appFilteredPosts;
     }
-  }, [data.posts, filter, accountContext.writableNames]);
+  }, [appFilteredPosts, filter, accountContext.writableNames]);
 
   const normalizedSearch = search.trim().toLowerCase();
 
@@ -841,7 +865,7 @@ export default function App() {
   // search term, sort change, or a refresh) so "Load more" always starts at the top.
   useEffect(() => {
     setVisibleCount(FEED_PAGE_SIZE);
-  }, [filter, normalizedSearch, sort, data.posts]);
+  }, [selectedAppFilter, filter, normalizedSearch, sort, data.posts]);
 
   const visiblePosts = sortedPosts.slice(0, visibleCount);
   const hasMorePosts = sortedPosts.length > visiblePosts.length;
@@ -866,6 +890,12 @@ export default function App() {
       default:
         return t('filter.orphan');
     }
+  }
+
+  function getAppFilterLabel(option: AppFilterOption) {
+    const label = option.kind === 'all' ? t('filter.all') : option.label;
+
+    return `${label} (${option.count})`;
   }
 
   // Store the app tag using the name owner's own capitalisation: if the entered
@@ -900,6 +930,11 @@ export default function App() {
 
   function selectFilter(value: FeedFilter) {
     setFilter(value);
+    setView('list');
+  }
+
+  function selectAppFilter(value: AppFilterValue) {
+    setSelectedAppFilter(value);
     setView('list');
   }
 
@@ -1095,10 +1130,8 @@ export default function App() {
           </span>
           <div>
             <div className="brand__title-row">
-              <h1>{t('app.title')}</h1>
-              <span className="app-version">{APP_VERSION}</span>
+              <h1>Help {APP_VERSION}</h1>
             </div>
-            <span>{t('label.feedback')}</span>
           </div>
         </div>
         <div className="topbar__actions">
@@ -1136,6 +1169,23 @@ export default function App() {
                     </option>
                   ))
                 )}
+              </select>
+            </label>
+          </div>
+
+          <div className="account-strip">
+            <label>
+              <span>{t('field.app')}</span>
+              <select
+                aria-label={t('field.app')}
+                onChange={(event) => selectAppFilter(event.target.value)}
+                value={selectedAppFilter}
+              >
+                {appFilterOptions.map((option) => (
+                  <option key={`${option.kind}:${option.value}`} value={option.value}>
+                    {getAppFilterLabel(option)}
+                  </option>
+                ))}
               </select>
             </label>
           </div>

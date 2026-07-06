@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildPostLink, getAppBaseAddress, getInitialComposerParams, getInitialPostId } from './deepLink';
+import {
+  buildPostLink,
+  getAppBaseAddress,
+  getInitialAppFilter,
+  getInitialComposerParams,
+  getInitialNewPostRequested,
+  getInitialPostId,
+} from './deepLink';
 
 describe('deep links', () => {
   it('reads the post id from the render query string', () => {
@@ -9,10 +16,25 @@ describe('deep links', () => {
     expect(getInitialPostId('?post=%20')).toBeNull();
   });
 
-  it('reads composer pre-fill params from the query string', () => {
-    expect(getInitialComposerParams('?app=Wallet&type=issue&theme=dark')).toEqual({ app: 'Wallet', type: 'issue' });
-    expect(getInitialComposerParams('?app=Chat&type=idea')).toEqual({ app: 'Chat', type: 'idea' });
-    expect(getInitialComposerParams('?app=%20')).toEqual({ app: null, type: null });
+  it('reads the app filter from the query string', () => {
+    expect(getInitialAppFilter('?app=Wallet&type=issue&theme=dark')).toBe('Wallet');
+    expect(getInitialAppFilter('?app=%20')).toBeNull();
+    expect(getInitialAppFilter('?new=Wallet')).toBeNull();
+    expect(getInitialAppFilter('')).toBeNull();
+  });
+
+  it('detects new post deep links from the query string', () => {
+    expect(getInitialNewPostRequested('?new')).toBe(true);
+    expect(getInitialNewPostRequested('?new=Wallet')).toBe(true);
+    expect(getInitialNewPostRequested('?app=Wallet')).toBe(false);
+    expect(getInitialNewPostRequested('')).toBe(false);
+  });
+
+  it('reads composer pre-fill params from new post links', () => {
+    expect(getInitialComposerParams('?new=Wallet&type=issue&theme=dark')).toEqual({ app: 'Wallet', type: 'issue' });
+    expect(getInitialComposerParams('?new=Chat&type=idea')).toEqual({ app: 'Chat', type: 'idea' });
+    expect(getInitialComposerParams('?new&type=idea')).toEqual({ app: null, type: 'idea' });
+    expect(getInitialComposerParams('?app=Wallet&type=issue')).toEqual({ app: null, type: 'issue' });
     expect(getInitialComposerParams('?type=bogus')).toEqual({ app: null, type: null });
     expect(getInitialComposerParams('')).toEqual({ app: null, type: null });
   });

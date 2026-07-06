@@ -16,6 +16,7 @@ const DEFAULT_IDENTIFIER = 'Help';
 
 export const POST_QUERY_PARAM = 'post';
 export const APP_QUERY_PARAM = 'app';
+export const NEW_QUERY_PARAM = 'new';
 export const TYPE_QUERY_PARAM = 'type';
 
 type LocationLike = {
@@ -90,19 +91,31 @@ export function getInitialPostId(search?: string): string | null {
   return value ? value : null;
 }
 
+export function getInitialNewPostRequested(search?: string): boolean {
+  const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
+
+  return new URLSearchParams(raw).has(NEW_QUERY_PARAM);
+}
+
+export function getInitialAppFilter(search?: string): string | null {
+  const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
+  const value = new URLSearchParams(raw).get(APP_QUERY_PARAM)?.trim();
+
+  return value ? value : null;
+}
+
 export type ComposerParams = {
   app: string | null;
   type: FeedbackKind | null;
 };
 
-// A second, independent deep link: `qdn://APP/Help/Help?app=<name>&type=<issue|idea>`
-// pre-fills the composer (which app the feedback is about, and its kind) so other
-// apps can hand off straight into a relevant "file feedback" form. Both params are
-// optional; `type` is only honoured for the two known kinds.
+// Compose links use `?new` for a general post and `?new=<name>` to pre-fill the
+// app field. `?app=<name>` is intentionally reserved for the filtered list view.
+// `type` is only honoured for the two known feedback kinds.
 export function getInitialComposerParams(search?: string): ComposerParams {
   const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
   const query = new URLSearchParams(raw);
-  const app = query.get(APP_QUERY_PARAM)?.trim() || null;
+  const app = query.has(NEW_QUERY_PARAM) ? query.get(NEW_QUERY_PARAM)?.trim() || null : null;
   const rawType = query.get(TYPE_QUERY_PARAM);
   const type: FeedbackKind | null = rawType === 'issue' || rawType === 'idea' ? rawType : null;
 

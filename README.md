@@ -28,7 +28,7 @@ Publish to the default Previewnet QDN identity:
 npm run qdn:publish
 ```
 
-By default this publishes `dist/` as `qdn://APP/Help/Help` using the local Previewnet account files under `~/git/qortium/preview`.
+By default this publishes `dist/` as `qdn://APP/Help/Help` using the local Previewnet account files under `~/qortium/git/qortium-core/preview/secrets`.
 
 The browser fallback can read public QDN feedback resources from `http://127.0.0.1:24891`. Publishing, editing, and deleting require Qortium Home with a selected account that owns a registered name.
 

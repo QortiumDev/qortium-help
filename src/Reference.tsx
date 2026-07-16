@@ -16,7 +16,7 @@ export const REFERENCE_SNIPPETS = {
     {
       "service": "IMAGE",
       "name": "ReporterName",
-      "identifier": "qhelp.attach.v1.m1abc123.0-example",
+      "identifier": "qhelp.attach.v1.m1abc123.0",
       "filename": "wallet.png",
       "mimeType": "image/png",
       "size": 48231,
@@ -394,8 +394,8 @@ export default function Reference() {
               </li>
               <li>
                 <code>PUBLISH_MULTIPLE_QDN_RESOURCES</code> publishes the attachment resources as a batch. Inspect
-                every failure before separately publishing the referencing feedback JSON with
-                <code> PUBLISH_QDN_RESOURCE</code>.
+                every failure and wait for every returned resource/signature target to reach <code>READY</code> before
+                separately publishing the referencing feedback JSON with <code> PUBLISH_QDN_RESOURCE</code>.
               </li>
               <li>Home owns account selection, signing, approval prompts, and node routing.</li>
             </ul>
@@ -405,9 +405,10 @@ export default function Reference() {
         <aside className="reference-callout">
           <strong>Attachment publishing is staged, not atomic.</strong>
           <p>
-            Publish all attachments first and stop if the batch reports any failure. Only then publish the feedback
-            JSON that references them. If the final JSON publish fails, the attachments can remain as unreferenced
-            public resources and the author may retry the feedback publish.
+            Publish all attachments first, stop if the batch reports any failure, and wait until each exact
+            transaction signature is the <code>READY</code> version of its resource. Only then publish the feedback
+            JSON that references them. Help derives stable attachment identifiers from the draft ID and attachment
+            position, so retrying the same draft reuses those tuples instead of creating another orphan set.
           </p>
         </aside>
 

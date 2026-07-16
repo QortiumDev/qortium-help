@@ -16,9 +16,10 @@ or reopen them. Post and comment bodies recognize `qdn://`, `home://`, and
 - Per-post detail and reply threads, copyable direct links, and ownership-gated
   edit, delete, complete, and reopen controls.
 - Up to three public QDN attachments on new posts and replies. Help first
-  publishes and verifies the attachment batch, then publishes the referencing
-  feedback JSON; media and documents open through the matching Home viewer when
-  available.
+  publishes the attachment batch, waits for every exact resource/signature
+  target to reach `READY`, then publishes the referencing feedback JSON. Stable
+  draft and attachment identifiers make retries reuse the same resource tuples;
+  media and documents open through the matching Home viewer when available.
 - A permanently English Developer Reference documenting the public JSON schema,
   identifiers, lifecycle, QDN metadata limits, bridge behavior, and copyable
   publish/search/fetch/delete examples.
@@ -35,12 +36,14 @@ and publish/delete actions. The plain-browser fallback can read public feedback
 resources from `http://127.0.0.1:24891`; creating, editing, deleting, completing,
 and reopening require Home and a selected account that owns a registered name.
 
-Help is at QAVS `1.4.2`: `1.4` is the minimum Qortium platform level and the
+Help is at QAVS `1.4.3`: `1.4` is the minimum Qortium platform level and the
 patch number is the app release. `vite.config.ts` reads `package.json`, injects
 the visible version, and emits `dist/qortium-app.json` with the name `Help`.
 
 The app supports Classic, Modern, and Fun QDN UI styles and follows Home theme,
-accent, language, and text-size settings.
+accent, language, and text-size settings. Its base scale matches Home, Polls,
+Minting, and Boards: 13px supporting text, 16px interface text, 21px section
+headings, and 28px page titles before Home's selected multiplier is applied.
 
 ## Development and verification
 
@@ -91,6 +94,7 @@ qdn://APP/Help/Help?app=<appName>           # filter the feed by app
 qdn://APP/Help/Help?type=<filter>            # select a feed filter
 qdn://APP/Help/Help?new                      # open a blank composer
 qdn://APP/Help/Help?new=<appName>&type=issue # prefill app and post type
+qdn://APP/Help/Help?view=developers          # open the Developer Reference
 ```
 
 `type` accepts the feed filters implemented in `src/deepLink.ts`, including

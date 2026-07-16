@@ -8,7 +8,11 @@ vi.mock('./qdnRequest', () => ({
   qdnRequest: qdnRequestMock,
 }));
 
-import { getResourceStatus, waitForFeedbackResourceReady } from './publishStatus';
+import {
+  getResourceStatus,
+  waitForFeedbackResourceReady,
+  waitForPublishedResourcesReady,
+} from './publishStatus';
 
 afterEach(() => {
   qdnRequestMock.mockReset();
@@ -71,5 +75,43 @@ describe('publish status parsing', () => {
         timeoutMs: 1,
       }),
     ).resolves.toBe(false);
+  });
+
+  it('waits for every published attachment target to become READY', async () => {
+    qdnRequestMock.mockImplementation(async (request: { identifier?: string }) => [
+      {
+        identifier: request.identifier,
+        latestSignature: `${request.identifier}-signature`,
+        name: 'Alice',
+        service: 'ATTACHMENT',
+        status: { status: 'READY' },
+      },
+    ]);
+
+    await expect(
+      waitForPublishedResourcesReady(
+        [
+          {
+            resource: {
+              identifier: 'qhelp.attach.v1.post.0',
+              name: 'Alice',
+              service: 'ATTACHMENT',
+            },
+            transactionSignature: 'qhelp.attach.v1.post.0-signature',
+          },
+          {
+            resource: {
+              identifier: 'qhelp.attach.v1.post.1',
+              name: 'Alice',
+              service: 'ATTACHMENT',
+            },
+            transactionSignature: 'qhelp.attach.v1.post.1-signature',
+          },
+        ],
+        1_000,
+      ),
+    ).resolves.toBe(true);
+
+    expect(qdnRequestMock).toHaveBeenCalledTimes(2);
   });
 });

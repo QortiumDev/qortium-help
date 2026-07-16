@@ -13,6 +13,8 @@ import {
   buildCommentIdentifier,
   buildPostIdentifier,
   buildWritableNames,
+  createCommentPayload,
+  createPostPayload,
   getCommentIdFromIdentifier,
   getPostIdFromIdentifier,
   loadFeedbackCommentsForPost,
@@ -271,6 +273,24 @@ describe('paged feedback loading', () => {
 });
 
 describe('feedback updates', () => {
+  it('reuses a supplied draft identity across publication retries', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(2_000);
+    const identity = { createdAt: 1_000, id: 'stable-draft' };
+
+    expect(createPostPayload('issue', 'Title', 'Body', 'Help', identity)).toMatchObject({
+      createdAt: 1_000,
+      id: 'stable-draft',
+      updatedAt: 2_000,
+    });
+    expect(createCommentPayload('post123', 'Reply', identity)).toMatchObject({
+      createdAt: 1_000,
+      id: 'stable-draft',
+      postId: 'post123',
+      updatedAt: 2_000,
+    });
+  });
+
   it('updates post content while preserving identity', () => {
     vi.useFakeTimers();
     vi.setSystemTime(2_000);

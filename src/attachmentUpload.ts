@@ -25,11 +25,20 @@ export type PreparedFeedbackAttachment = {
   size: number;
 };
 
-type PublishMultipleResult = {
+export type PublishedQdnResource = {
+  resource: {
+    identifier: string | null;
+    name: string;
+    service: string;
+  };
+  transactionSignature: string;
+};
+
+export type PublishMultipleResult = {
   accepted?: boolean;
   action?: string;
   failures?: unknown[];
-  published?: unknown[];
+  published?: PublishedQdnResource[];
 };
 
 export function getAttachmentService(file: Pick<File, 'type'>): AttachmentService {
@@ -153,9 +162,7 @@ export async function prepareFeedbackAttachment(file: File): Promise<PreparedFee
 }
 
 function buildAttachmentIdentifier(payload: FeedbackPayload, index: number) {
-  const random = Math.random().toString(36).slice(2, 8);
-
-  return `qhelp.attach.v1.${payload.id}.${index.toString(36)}-${random}`.slice(0, 64);
+  return `qhelp.attach.v1.${payload.id}.${index.toString(36)}`.slice(0, 64);
 }
 
 export function prepareFeedbackBundle(
@@ -236,6 +243,36 @@ export async function publishPreparedFeedbackBundle(
 
   if (Array.isArray(result.failures) && result.failures.length > 0) {
     throw new Error(`Publishing failed for ${result.failures.length} resource(s).`);
+  }
+
+  const published = Array.isArray(result.published) ? result.published : [];
+  const expectedTargets = new Set(
+    bundle.attachmentResources.map(
+      (resource) => `${resource.service}\u0000${resource.name}\u0000${resource.identifier}`,
+    ),
+  );
+  const publishedTargets = new Set(
+    published.map(
+      (entry) =>
+        `${entry?.resource?.service ?? ''}\u0000${entry?.resource?.name ?? ''}\u0000${entry?.resource?.identifier ?? ''}`,
+    ),
+  );
+
+  if (
+    published.length !== bundle.attachmentResources.length ||
+    publishedTargets.size !== expectedTargets.size ||
+    published.some(
+      (entry) =>
+        !entry?.transactionSignature ||
+        !entry.resource?.identifier ||
+        !entry.resource.name ||
+        !entry.resource.service ||
+        !expectedTargets.has(
+          `${entry.resource.service}\u0000${entry.resource.name}\u0000${entry.resource.identifier}`,
+        ),
+    )
+  ) {
+    throw new Error('Home accepted the attachment batch but did not return complete confirmation targets.');
   }
 
   return result;

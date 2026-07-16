@@ -51,6 +51,7 @@ import {
   buildPostLink,
   getInitialAppFilter,
   getInitialComposerParams,
+  getInitialDeveloperReferenceRequested,
   getInitialFeedFilter,
   getInitialNewPostRequested,
   getInitialPostId,
@@ -64,6 +65,7 @@ import {
   buildPostIdentifier,
   canOwnResource,
   createCommentPayload,
+  createFeedbackId,
   createPostPayload,
   deleteFeedbackResource,
   FEEDBACK_COMMENT_PAGE_SIZE,
@@ -81,11 +83,12 @@ import {
   updatePostPayload,
   type AccountContext,
   type FeedbackCommentPayload,
+  type FeedbackDraftIdentity,
   type FeedbackKind,
   type FeedbackPostPayload,
   type FeedbackResource,
 } from './qdnFeedback';
-import { waitForFeedbackResourceReady } from './publishStatus';
+import { waitForFeedbackResourceReady, waitForPublishedResourcesReady } from './publishStatus';
 import Reference from './Reference';
 import type { BridgeState, QdnAction } from './types';
 
@@ -94,7 +97,14 @@ type FeedFilter = InitialFeedFilter;
 type SortOrder = 'active' | 'newest';
 const SORT_ORDERS: SortOrder[] = ['active', 'newest'];
 type MainView = 'compose' | 'detail' | 'list' | 'reference';
-type WritePhase = 'idle' | 'pending' | 'preparing' | 'submitting' | 'confirming' | 'published';
+type WritePhase =
+  | 'confirming'
+  | 'confirming-attachments'
+  | 'idle'
+  | 'pending'
+  | 'preparing'
+  | 'published'
+  | 'submitting';
 
 type FeedbackData = {
   comments: FeedbackResource<FeedbackCommentPayload>[];
@@ -114,6 +124,13 @@ const emptyBridgeState: BridgeState = {
 
 const FILTERS: FeedFilter[] = ['all', 'open', 'completed', 'issue', 'idea', 'orphan'];
 const APP_VERSION = __APP_VERSION__;
+
+function createDraftIdentity(): FeedbackDraftIdentity {
+  return {
+    createdAt: Date.now(),
+    id: createFeedbackId(),
+  };
+}
 
 // qortium-core and qortium-home aren't published QDN APP resources, so they never
 // come back from the resource search — seed them into the app dropdown explicitly.
@@ -446,6 +463,7 @@ function PostComposer({
     body: string,
     app: string | null,
     attachments: PreparedFeedbackAttachment[],
+    identity: FeedbackDraftIdentity,
   ) => Promise<boolean>;
   publishName: string;
   publishNames: string[];
@@ -457,6 +475,7 @@ function PostComposer({
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [attachments, setAttachments] = useState<PreparedFeedbackAttachment[]>([]);
+  const [draftIdentity, setDraftIdentity] = useState(createDraftIdentity);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -467,7 +486,7 @@ function PostComposer({
 
     // `app` comes from a fixed dropdown (no stray whitespace); the payload factory
     // is the single place that trims/normalises it, so don't trim again here.
-    const success = await onSubmit(type, title, body, app || null, attachments);
+    const success = await onSubmit(type, title, body, app || null, attachments, draftIdentity);
 
     if (success) {
       setTitle('');
@@ -475,6 +494,7 @@ function PostComposer({
       setType(initialType ?? 'issue');
       setApp(initialApp ?? '');
       setAttachments([]);
+      setDraftIdentity(createDraftIdentity());
     }
   }
 
@@ -716,12 +736,17 @@ function ReplyComposer({
 }: {
   canAttach: boolean;
   canPublish: boolean;
-  onSubmit: (body: string, attachments: PreparedFeedbackAttachment[]) => Promise<boolean>;
+  onSubmit: (
+    body: string,
+    attachments: PreparedFeedbackAttachment[],
+    identity: FeedbackDraftIdentity,
+  ) => Promise<boolean>;
   publishing: boolean;
   t: ReturnType<typeof createTranslator>;
 }) {
   const [body, setBody] = useState('');
   const [attachments, setAttachments] = useState<PreparedFeedbackAttachment[]>([]);
+  const [draftIdentity, setDraftIdentity] = useState(createDraftIdentity);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -730,11 +755,12 @@ function ReplyComposer({
       return;
     }
 
-    const success = await onSubmit(body, attachments);
+    const success = await onSubmit(body, attachments, draftIdentity);
 
     if (success) {
       setBody('');
       setAttachments([]);
+      setDraftIdentity(createDraftIdentity());
     }
   }
 
@@ -785,7 +811,13 @@ export default function App() {
     getInitialPostId() || getInitialNewPostRequested() ? APP_FILTER_ALL : getInitialAppFilter() ?? APP_FILTER_ALL,
   );
   const [view, setView] = useState<MainView>(() =>
-    getInitialPostId() ? 'list' : getInitialNewPostRequested() ? 'compose' : 'list',
+    getInitialDeveloperReferenceRequested()
+      ? 'reference'
+      : getInitialPostId()
+        ? 'list'
+        : getInitialNewPostRequested()
+          ? 'compose'
+          : 'list',
   );
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [publishName, setPublishName] = useState('');
@@ -835,6 +867,18 @@ export default function App() {
   useLayoutEffect(() => {
     applyDisplaySettings(displaySettings);
   }, [displaySettings]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+
+    if (view === 'reference') {
+      url.searchParams.set('view', 'developers');
+    } else {
+      url.searchParams.delete('view');
+    }
+
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [view]);
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
@@ -1447,12 +1491,23 @@ export default function App() {
       setWritePhase('submitting');
 
       if (preparedBundle) {
-        await publishPreparedFeedbackBundle(preparedBundle);
+        const attachmentsResult = await publishPreparedFeedbackBundle(preparedBundle);
+        setWritePhase('confirming-attachments');
+
+        const attachmentsReady = await waitForPublishedResourcesReady(attachmentsResult.published ?? []);
+
+        if (!attachmentsReady) {
+          throw new Error(
+            'Attachments were submitted but are still awaiting QDN confirmation. Their stable resource identifiers will be reused if you retry.',
+          );
+        }
+
+        setWritePhase('submitting');
       }
 
-      // Publish the referencing JSON only after every attachment was accepted.
-      // This prevents a feedback post from pointing at an attachment whose
-      // publication already failed.
+      // Publish the referencing JSON only after every attachment is READY.
+      // A retry reuses the same feedback and attachment identifiers, avoiding
+      // duplicate public resources when the final JSON step fails.
       const publishResult = await publishFeedbackPayload(name, payloadToPublish);
 
       setWritePhase('confirming');
@@ -1535,9 +1590,10 @@ export default function App() {
     body: string,
     app: string | null,
     attachments: PreparedFeedbackAttachment[],
+    identity: FeedbackDraftIdentity,
   ) {
     const success = await publishAndRefresh(
-      createPostPayload(type, title, body, canonicalAppName(app)),
+      createPostPayload(type, title, body, canonicalAppName(app), identity),
       publishName,
       attachments,
     );
@@ -1549,12 +1605,20 @@ export default function App() {
     return success;
   }
 
-  async function handleCreateComment(body: string, attachments: PreparedFeedbackAttachment[]) {
+  async function handleCreateComment(
+    body: string,
+    attachments: PreparedFeedbackAttachment[],
+    identity: FeedbackDraftIdentity,
+  ) {
     if (!selectedPost) {
       return false;
     }
 
-    return publishAndRefresh(createCommentPayload(selectedPost.payload.id, body), publishName, attachments);
+    return publishAndRefresh(
+      createCommentPayload(selectedPost.payload.id, body, identity),
+      publishName,
+      attachments,
+    );
   }
 
   async function handleToggleStatus(post: FeedbackResource<FeedbackPostPayload>) {
@@ -1679,6 +1743,8 @@ export default function App() {
         return 'Preparing attachments…';
       case 'submitting':
         return 'Submitting to QDN…';
+      case 'confirming-attachments':
+        return 'Awaiting attachment confirmation…';
       case 'confirming':
         return 'Awaiting QDN confirmation…';
       case 'pending':

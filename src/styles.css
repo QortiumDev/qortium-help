@@ -41,9 +41,9 @@
 :root {
   --qh-scale: 1;
   --qh-text: calc(16px * var(--qh-scale));
-  --qh-text-small: calc(12px * var(--qh-scale));
-  --qh-text-title: calc(22px * var(--qh-scale));
-  --qh-text-heading: calc(18px * var(--qh-scale));
+  --qh-text-small: calc(13px * var(--qh-scale));
+  --qh-text-title: calc(28px * var(--qh-scale));
+  --qh-text-heading: calc(21px * var(--qh-scale));
   --qh-radius: 8px;
   --qh-radius-sm: 6px;
   --qh-page: #f7f5ef;
@@ -1171,9 +1171,7 @@ textarea:focus {
 }
 
 .post-detail h2 {
-  /* resp-4: grow the heading ceiling with the text-size scale so the title
-     stays larger than body text at the largest scales (default 32px at scale 1). */
-  font-size: clamp(20px, 4vw, calc(28px + 4px * var(--qh-scale)));
+  font-size: var(--qh-text-title);
   letter-spacing: 0;
   line-height: 1.16;
   margin: 0;
@@ -1619,6 +1617,7 @@ textarea:focus-visible {
 .developer-reference {
   display: grid;
   gap: 18px;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   width: 100%;
 }
@@ -1631,8 +1630,17 @@ textarea:focus-visible {
   border-radius: var(--qh-radius);
   display: grid;
   gap: 9px;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   padding: clamp(18px, 3vw, 32px);
+}
+
+.reference-hero > *,
+.reference-section > *,
+.reference-card > *,
+.reference-callout > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .reference-hero h1,
@@ -1643,7 +1651,7 @@ textarea:focus-visible {
 }
 
 .reference-hero h1 {
-  font-size: clamp(24px, 3vw, 38px);
+  font-size: var(--qh-text-title);
   line-height: 1.12;
 }
 
@@ -1713,7 +1721,7 @@ textarea:focus-visible {
 }
 
 .reference-section__heading h2 {
-  font-size: clamp(20px, 2vw, 28px);
+  font-size: var(--qh-text-heading);
 }
 
 .reference-grid {
@@ -1874,7 +1882,7 @@ textarea:focus-visible {
 
 .reference-limit strong {
   color: var(--qh-accent);
-  font-size: clamp(22px, 3vw, 32px);
+  font-size: var(--qh-text-title);
   line-height: 1;
 }
 
@@ -1938,6 +1946,23 @@ textarea:focus-visible {
     align-items: flex-start;
     flex-wrap: wrap;
   }
+
+  :root[data-text-size='extra-large'] .app-tabs,
+  :root[data-text-size='huge'] .app-tabs,
+  :root[data-text-size='extra-large'] .reference-toc,
+  :root[data-text-size='huge'] .reference-toc {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: visible;
+  }
+
+  :root[data-text-size='extra-large'] .app-tab,
+  :root[data-text-size='huge'] .app-tab,
+  :root[data-text-size='extra-large'] .reference-toc a,
+  :root[data-text-size='huge'] .reference-toc a {
+    min-width: 0;
+    white-space: normal;
+  }
 }
 
 :root[data-ui='modern'] body {
@@ -1968,7 +1993,7 @@ textarea:focus-visible {
 }
 
 :root[data-ui='modern'] .brand h1 {
-  font-size: calc(18px * var(--qh-scale));
+  font-size: var(--qh-text-title);
   line-height: 1.15;
 }
 

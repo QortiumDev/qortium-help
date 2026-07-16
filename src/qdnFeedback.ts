@@ -56,6 +56,11 @@ export type FeedbackCommentPayload = {
 
 export type FeedbackPayload = FeedbackPostPayload | FeedbackCommentPayload;
 
+export type FeedbackDraftIdentity = {
+  createdAt: number;
+  id: string;
+};
+
 export type FeedbackResource<T extends FeedbackPayload = FeedbackPayload> = {
   created: number;
   identifier: string;
@@ -710,15 +715,17 @@ export function createPostPayload(
   title: string,
   body: string,
   app?: string | null,
+  identity?: FeedbackDraftIdentity,
 ): FeedbackPostPayload {
-  const id = createFeedbackId();
   const now = Date.now();
+  const id = identity?.id ?? createFeedbackId();
+  const createdAt = identity?.createdAt ?? now;
 
   return {
     app: app?.trim() || null,
     attachments: [],
     body: normalizeBody(body),
-    createdAt: now,
+    createdAt,
     id,
     kind: 'post',
     schema: FEEDBACK_SCHEMA,
@@ -729,14 +736,19 @@ export function createPostPayload(
   };
 }
 
-export function createCommentPayload(postId: string, body: string): FeedbackCommentPayload {
-  const id = createFeedbackId();
+export function createCommentPayload(
+  postId: string,
+  body: string,
+  identity?: FeedbackDraftIdentity,
+): FeedbackCommentPayload {
   const now = Date.now();
+  const id = identity?.id ?? createFeedbackId();
+  const createdAt = identity?.createdAt ?? now;
 
   return {
     attachments: [],
     body: normalizeBody(body),
-    createdAt: now,
+    createdAt,
     id,
     kind: 'comment',
     postId,

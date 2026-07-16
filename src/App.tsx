@@ -70,7 +70,9 @@ import {
   deleteFeedbackResource,
   FEEDBACK_COMMENT_PAGE_SIZE,
   FEEDBACK_POST_PAGE_SIZE,
+  isFeedbackResourceEdited,
   loadAccountContext,
+  loadFeedbackCommentCounts,
   loadFeedbackCommentsPage,
   loadFeedbackCommentsForPost,
   loadFeedbackPostById,
@@ -82,6 +84,7 @@ import {
   updateCommentPayload,
   updatePostPayload,
   type AccountContext,
+  type FeedbackCommentCounts,
   type FeedbackCommentPayload,
   type FeedbackDraftIdentity,
   type FeedbackKind,
@@ -475,7 +478,7 @@ function PostComposer({
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [attachments, setAttachments] = useState<PreparedFeedbackAttachment[]>([]);
-  const [draftIdentity, setDraftIdentity] = useState(createDraftIdentity);
+  const [draftIdentity, setDraftIdentity] = useState<FeedbackDraftIdentity | null>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -486,7 +489,13 @@ function PostComposer({
 
     // `app` comes from a fixed dropdown (no stray whitespace); the payload factory
     // is the single place that trims/normalises it, so don't trim again here.
-    const success = await onSubmit(type, title, body, app || null, attachments, draftIdentity);
+    const identity = draftIdentity ?? createDraftIdentity();
+
+    if (!draftIdentity) {
+      setDraftIdentity(identity);
+    }
+
+    const success = await onSubmit(type, title, body, app || null, attachments, identity);
 
     if (success) {
       setTitle('');
@@ -494,7 +503,7 @@ function PostComposer({
       setType(initialType ?? 'issue');
       setApp(initialApp ?? '');
       setAttachments([]);
-      setDraftIdentity(createDraftIdentity());
+      setDraftIdentity(null);
     }
   }
 
@@ -619,12 +628,12 @@ function FeedItem({
   post,
   t,
 }: {
-  commentCount: number | null;
+  commentCount: number;
   onSelect: () => void;
   post: FeedbackResource<FeedbackPostPayload>;
   t: ReturnType<typeof createTranslator>;
 }) {
-  const edited = post.payload.updatedAt > post.payload.createdAt;
+  const edited = isFeedbackResourceEdited(post);
   const completed = post.payload.status === 'done';
 
   return (
@@ -648,7 +657,7 @@ function FeedItem({
       </span>
       <span className="reply-count">
         <MessageSquare aria-hidden="true" />
-        {commentCount ?? '—'}
+        {commentCount}
       </span>
     </button>
   );
@@ -687,7 +696,7 @@ function CommentView({
         <Avatar name={comment.ownerName} size={24} />
         <span>{getDisplayName(comment.ownerName)}</span>
         <span>{formatRelativeTime(comment.updated)}</span>
-        {comment.payload.updatedAt > comment.payload.createdAt ? <span>{t('label.edited')}</span> : null}
+        {isFeedbackResourceEdited(comment) ? <span>{t('label.edited')}</span> : null}
       </div>
       {editing ? (
         <div className="edit-box">
@@ -746,7 +755,7 @@ function ReplyComposer({
 }) {
   const [body, setBody] = useState('');
   const [attachments, setAttachments] = useState<PreparedFeedbackAttachment[]>([]);
-  const [draftIdentity, setDraftIdentity] = useState(createDraftIdentity);
+  const [draftIdentity, setDraftIdentity] = useState<FeedbackDraftIdentity | null>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -755,12 +764,18 @@ function ReplyComposer({
       return;
     }
 
-    const success = await onSubmit(body, attachments, draftIdentity);
+    const identity = draftIdentity ?? createDraftIdentity();
+
+    if (!draftIdentity) {
+      setDraftIdentity(identity);
+    }
+
+    const success = await onSubmit(body, attachments, identity);
 
     if (success) {
       setBody('');
       setAttachments([]);
-      setDraftIdentity(createDraftIdentity());
+      setDraftIdentity(null);
     }
   }
 
@@ -802,6 +817,7 @@ export default function App() {
   const [accountLoaded, setAccountLoaded] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [data, setData] = useState<FeedbackData>(emptyData);
+  const [commentCounts, setCommentCounts] = useState<FeedbackCommentCounts>({});
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FeedFilter>(() =>
@@ -849,6 +865,7 @@ export default function App() {
   const orphanLoadRef = useRef(false);
   const writeInFlightRef = useRef(false);
   const writeResetTimerRef = useRef<number | null>(null);
+  const searchRefreshInitializedRef = useRef(false);
 
   const t = useMemo(() => createTranslator(displaySettings.language), [displaySettings.language]);
   const accountLocked = accountContext.account?.isUnlocked === false;
@@ -935,12 +952,14 @@ export default function App() {
     }
   }
 
-  async function refreshFeedback(query = search) {
+  async function refreshFeedback(query = search, showLoading = false) {
     // Tag this refresh so a slower in-flight load cannot clobber the result of a
     // newer one (e.g. refresh fired again after a publish/delete) (core-1).
     const token = ++refreshTokenRef.current;
 
-    setLoadState('loading');
+    if (showLoading) {
+      setLoadState('loading');
+    }
     setLoadError(null);
 
     try {
@@ -949,6 +968,7 @@ export default function App() {
         offset: 0,
         query: query.trim() || undefined,
       });
+      const counts = await loadFeedbackCommentCounts(page.posts.map((post) => post.payload.id));
 
       if (token !== refreshTokenRef.current) {
         return;
@@ -968,6 +988,7 @@ export default function App() {
           posts,
         };
       });
+      setCommentCounts((current) => ({ ...current, ...counts }));
       setPostsNextOffset(page.nextOffset);
       setLoadState('ready');
     } catch (error) {
@@ -975,7 +996,9 @@ export default function App() {
         return;
       }
 
-      setLoadState('error');
+      if (showLoading) {
+        setLoadState('error');
+      }
       setLoadError(getErrorMessage(error, t('error.load')));
     }
   }
@@ -993,6 +1016,7 @@ export default function App() {
         offset: postsNextOffset,
         query: search.trim() || undefined,
       });
+      const counts = await loadFeedbackCommentCounts(page.posts.map((post) => post.payload.id));
 
       setData((current) => {
         const postsByIdentifier = new Map(current.posts.map((post) => [post.identifier, post]));
@@ -1006,6 +1030,7 @@ export default function App() {
           posts: [...postsByIdentifier.values()],
         };
       });
+      setCommentCounts((current) => ({ ...current, ...counts }));
       setPostsNextOffset(page.nextOffset);
     } catch (error) {
       setLoadError(getErrorMessage(error, t('error.load')));
@@ -1021,10 +1046,13 @@ export default function App() {
     setLoadingComments(true);
 
     try {
-      const page = await loadFeedbackCommentsForPost(postId, {
-        limit: FEEDBACK_COMMENT_PAGE_SIZE,
-        offset,
-      });
+      const [page, counts] = await Promise.all([
+        loadFeedbackCommentsForPost(postId, {
+          limit: FEEDBACK_COMMENT_PAGE_SIZE,
+          offset,
+        }),
+        loadFeedbackCommentCounts([postId]),
+      ]);
 
       if (token !== commentsTokenRef.current) {
         return;
@@ -1044,6 +1072,7 @@ export default function App() {
           ],
         };
       });
+      setCommentCounts((current) => ({ ...current, ...counts }));
       setCommentsNextOffset(page.nextOffset);
     } catch (error) {
       setLoadError(getErrorMessage(error, t('error.load')));
@@ -1103,6 +1132,12 @@ export default function App() {
         comments: [...new Map(comments.map((comment) => [comment.identifier, comment])).values()],
         posts: [...new Map(posts.map((post) => [post.identifier, post])).values()],
       });
+      const counts = comments.reduce<FeedbackCommentCounts>((result, comment) => {
+        result[comment.payload.postId] = (result[comment.payload.postId] ?? 0) + 1;
+        return result;
+      }, {});
+
+      setCommentCounts(counts);
       setPostsNextOffset(null);
       setOrphanDataLoaded(true);
       setLoadState('ready');
@@ -1120,7 +1155,7 @@ export default function App() {
     setBridgeState(state);
     await Promise.all([
       refreshAccount(),
-      filter === 'orphan' ? loadAllFeedbackForOrphans() : refreshFeedback(),
+      filter === 'orphan' ? loadAllFeedbackForOrphans() : refreshFeedback(search, true),
       selectedPostId ? loadCommentsForPost(selectedPostId) : Promise.resolve(),
     ]);
   }
@@ -1131,8 +1166,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!searchRefreshInitializedRef.current) {
+      searchRefreshInitializedRef.current = true;
+      return;
+    }
+
     const timer = window.setTimeout(() => {
-      if (view === 'list' && filter !== 'orphan') {
+      if (filter !== 'orphan') {
         void refreshFeedback(search);
       }
     }, 350);
@@ -1140,7 +1180,7 @@ export default function App() {
     return () => window.clearTimeout(timer);
     // The refresh function intentionally reads the current display translator.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filter, view]);
+  }, [search]);
 
   useEffect(() => {
     if (!selectedPostId) {
@@ -1487,6 +1527,12 @@ export default function App() {
           ? { ...current, posts: nextCollection as FeedbackResource<FeedbackPostPayload>[] }
           : { ...current, comments: nextCollection as FeedbackResource<FeedbackCommentPayload>[] };
       });
+      if (payloadToPublish.kind === 'comment' && !replacedResource) {
+        setCommentCounts((current) => ({
+          ...current,
+          [payloadToPublish.postId]: (current[payloadToPublish.postId] ?? 0) + 1,
+        }));
+      }
 
       setWritePhase('submitting');
 
@@ -1573,6 +1619,14 @@ export default function App() {
             ? { ...current, posts: restored as FeedbackResource<FeedbackPostPayload>[] }
             : { ...current, comments: restored as FeedbackResource<FeedbackCommentPayload>[] };
         });
+        if (optimisticResource.payload.kind === 'comment' && !replacedResource) {
+          const postId = optimisticResource.payload.postId;
+
+          setCommentCounts((current) => ({
+            ...current,
+            [postId]: Math.max(0, (current[postId] ?? 1) - 1),
+          }));
+        }
       }
 
       setLoadError(getErrorMessage(error, t('error.publish')));
@@ -1991,7 +2045,7 @@ export default function App() {
                       <Avatar name={selectedPost.ownerName} size={28} />
                       <span>{getDisplayName(selectedPost.ownerName)}</span>
                       <span>{formatRelativeTime(selectedPost.updated)}</span>
-                      {selectedPost.payload.updatedAt > selectedPost.payload.createdAt ? <span>{t('label.edited')}</span> : null}
+                      {isFeedbackResourceEdited(selectedPost) ? <span>{t('label.edited')}</span> : null}
                       {selectedPost.payload.app ? (
                         <>
                           <button
@@ -2210,9 +2264,9 @@ export default function App() {
                   ? visiblePosts.map((post) => (
                       <FeedItem
                         commentCount={
-                          commentsByPostId.has(post.payload.id)
-                            ? commentsByPostId.get(post.payload.id)?.length ?? 0
-                            : null
+                          commentCounts[post.payload.id] ??
+                          commentsByPostId.get(post.payload.id)?.length ??
+                          0
                         }
                         key={post.identifier}
                         onSelect={() => openDetail(post.payload.id)}
@@ -2249,9 +2303,9 @@ export default function App() {
                         {posts.map((post) => (
                           <FeedItem
                             commentCount={
-                              commentsByPostId.has(post.payload.id)
-                                ? commentsByPostId.get(post.payload.id)?.length ?? 0
-                                : null
+                              commentCounts[post.payload.id] ??
+                              commentsByPostId.get(post.payload.id)?.length ??
+                              0
                             }
                             key={post.identifier}
                             onSelect={() => openDetail(post.payload.id)}

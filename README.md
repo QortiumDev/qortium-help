@@ -11,7 +11,9 @@ or reopen them. Post and comment bodies recognize `qdn://`, `home://`, and
 - Feed filters for all, open, completed, issues, ideas, orphan comments, and
   apps owned by the selected account.
 - An app dropdown, server-backed text search, active/newest sorting, paged post
-  retrieval, and replies fetched only when a post opens.
+  retrieval, metadata-only reply counts in the feed, and reply bodies fetched
+  only when a post opens. Client-side filter changes keep the existing feed
+  mounted instead of flashing the initial loading state.
 - Registered-name avatars on posts and comments.
 - Per-post detail and reply threads, copyable direct links, and ownership-gated
   edit, delete, complete, and reopen controls.
@@ -25,6 +27,8 @@ or reopen them. Post and comment bodies recognize `qdn://`, `home://`, and
   publish/search/fetch/delete examples.
 - Explicit preparing, submitting, confirmation, and published states for QDN
   writes, with optimistic posts/replies retained while confirmation completes.
+- New posts and replies use the first publish attempt as their creation time and
+  are labeled Edited only after QDN records a later revision.
 
 Classic, Modern, and Fun all use the full app window responsively. Modern keeps
 wider gutters, while Classic and Fun remain denser.
@@ -36,7 +40,7 @@ and publish/delete actions. The plain-browser fallback can read public feedback
 resources from `http://127.0.0.1:24891`; creating, editing, deleting, completing,
 and reopening require Home and a selected account that owns a registered name.
 
-Help is at QAVS `1.4.3`: `1.4` is the minimum Qortium platform level and the
+Help is at QAVS `1.4.4`: `1.4` is the minimum Qortium platform level and the
 patch number is the app release. `vite.config.ts` reads `package.json`, injects
 the visible version, and emits `dist/qortium-app.json` with the name `Help`.
 

@@ -13,6 +13,8 @@ export const FEEDBACK_TAGS = ['qortium-help', 'feedback', 'v1'];
 const FEEDBACK_SERVICE = 'JSON';
 const FEEDBACK_FILE_NAME = 'feedback.json';
 const MAX_FEEDBACK_RESOURCE_BYTES = 200_000;
+export const FEEDBACK_POST_PAGE_SIZE = 40;
+export const FEEDBACK_COMMENT_PAGE_SIZE = 80;
 
 export type FeedbackKind = 'idea' | 'issue';
 export type FeedbackStatus = 'done' | 'open';
@@ -69,6 +71,31 @@ export type AccountContext = {
   writableNames: string[];
 };
 
+export type FeedbackPageOptions = {
+  limit?: number;
+  offset?: number;
+};
+
+export type FeedbackPostPageOptions = FeedbackPageOptions & {
+  query?: string;
+  title?: string;
+};
+
+export type FeedbackPageInfo = {
+  hasMore: boolean;
+  limit: number;
+  nextOffset: number | null;
+  offset: number;
+};
+
+export type FeedbackPostsPage = FeedbackPageInfo & {
+  posts: FeedbackResource<FeedbackPostPayload>[];
+};
+
+export type FeedbackCommentsPage = FeedbackPageInfo & {
+  comments: FeedbackResource<FeedbackCommentPayload>[];
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -98,6 +125,25 @@ function bytesToBase64(bytes: Uint8Array) {
 
 export function jsonToBase64(value: unknown) {
   return bytesToBase64(new TextEncoder().encode(JSON.stringify(value, null, 2)));
+}
+
+export function truncateUtf8(value: string, maxBytes: number) {
+  const encoder = new TextEncoder();
+  let result = '';
+  let byteLength = 0;
+
+  for (const character of value) {
+    const characterBytes = encoder.encode(character).byteLength;
+
+    if (byteLength + characterBytes > maxBytes) {
+      break;
+    }
+
+    result += character;
+    byteLength += characterBytes;
+  }
+
+  return result;
 }
 
 export function createFeedbackId() {
@@ -299,33 +345,59 @@ async function fetchFeedbackResource<T extends FeedbackPayload>(
   }
 }
 
-async function searchFeedbackResources(identifierPrefix: string, limit: number) {
+type FeedbackResourceSearchOptions = FeedbackPageOptions & {
+  query?: string;
+  title?: string;
+};
+
+async function searchFeedbackResources(identifierPrefix: string, options: FeedbackResourceSearchOptions) {
   const resources = await qdnRequest<unknown>({
     action: 'SEARCH_QDN_RESOURCES',
     identifier: identifierPrefix,
     includeMetadata: true,
     includeStatus: true,
-    limit,
+    limit: options.limit,
     mode: 'ALL',
-    prefix: true,
+    offset: options.offset,
+    // Core applies `prefix` to text search fields too. Keep identifier-prefix
+    // matching for ordinary paging, but disable it when query/title filtering
+    // is present so searches match complete words rather than only prefixes.
+    prefix: !options.query && !options.title,
+    query: options.query,
     reverse: true,
     service: FEEDBACK_SERVICE,
+    title: options.title,
   });
 
-  return normalizeResources(resources);
+  return normalizeResources(resources).filter((resource) => resource.identifier?.startsWith(identifierPrefix));
 }
 
-// Cache fetched resource payloads keyed by service+identifier, tagged with the
-// resource's latestSignature. A QDN resource is immutable per signature, so when
-// a later search returns the same signature we can skip re-downloading it. This
-// turns a full N+1 re-fetch on every refresh into a fetch of only changed/new
-// resources (eff-1).
+// Cache fetched resource payloads keyed by service+name+identifier, tagged with
+// the resource's latestSignature. A QDN resource is immutable per signature, so
+// when a later search returns the same signature we can skip re-downloading it.
+// Including the owner name keeps otherwise-identical identifiers isolated.
 type CachedFeedbackResource = { signature: string; value: FeedbackResource<FeedbackPayload> };
 
 const feedbackResourceCache = new Map<string, CachedFeedbackResource>();
+const MAX_FEEDBACK_CACHE_ENTRIES = 500;
 
 function resourceCacheKey(resource: QdnResource) {
-  return `${resource.service}:${resource.identifier}`;
+  return `${resource.service}:${resource.name}:${resource.identifier}`;
+}
+
+function cacheFeedbackResource(key: string, entry: CachedFeedbackResource) {
+  feedbackResourceCache.delete(key);
+  feedbackResourceCache.set(key, entry);
+
+  while (feedbackResourceCache.size > MAX_FEEDBACK_CACHE_ENTRIES) {
+    const oldestKey = feedbackResourceCache.keys().next().value as string | undefined;
+
+    if (!oldestKey) {
+      break;
+    }
+
+    feedbackResourceCache.delete(oldestKey);
+  }
 }
 
 async function fetchFeedbackResourceCached<T extends FeedbackPayload>(
@@ -339,6 +411,7 @@ async function fetchFeedbackResourceCached<T extends FeedbackPayload>(
     const cached = feedbackResourceCache.get(key);
 
     if (cached && cached.signature === signature && cached.value.payload.kind === expectedKind) {
+      cacheFeedbackResource(key, cached);
       return cached.value as FeedbackResource<T>;
     }
   }
@@ -346,32 +419,155 @@ async function fetchFeedbackResourceCached<T extends FeedbackPayload>(
   const value = await fetchFeedbackResource<T>(resource, expectedKind);
 
   if (value && signature) {
-    feedbackResourceCache.set(key, { signature, value });
+    cacheFeedbackResource(key, { signature, value });
   }
 
   return value;
 }
 
+function normalizePageOptions(options: FeedbackPageOptions, defaultLimit: number) {
+  const requestedLimit = Math.floor(options.limit ?? defaultLimit);
+  const requestedOffset = Math.floor(options.offset ?? 0);
+
+  return {
+    limit: requestedLimit > 0 ? requestedLimit : defaultLimit,
+    offset: requestedOffset > 0 ? requestedOffset : 0,
+  };
+}
+
+function buildPageInfo(offset: number, limit: number, resourceCount: number): FeedbackPageInfo {
+  const hasMore = resourceCount >= limit;
+
+  return {
+    hasMore,
+    limit,
+    nextOffset: hasMore ? offset + resourceCount : null,
+    offset,
+  };
+}
+
+/**
+ * Load one page of feedback posts. Search text is passed to Core so supported
+ * bridges can filter by QDN metadata before any resource bodies are fetched.
+ */
+export async function loadFeedbackPostsPage(options: FeedbackPostPageOptions = {}): Promise<FeedbackPostsPage> {
+  const page = normalizePageOptions(options, FEEDBACK_POST_PAGE_SIZE);
+  const resources = await searchFeedbackResources(FEEDBACK_POST_PREFIX, {
+    ...page,
+    query: getString(options.query) || undefined,
+    title: getString(options.title) || undefined,
+  });
+  const posts = await Promise.all(
+    resources.map((resource) => fetchFeedbackResourceCached<FeedbackPostPayload>(resource, 'post')),
+  );
+
+  return {
+    ...buildPageInfo(page.offset, page.limit, resources.length),
+    posts: posts
+      .filter((post): post is FeedbackResource<FeedbackPostPayload> => !!post)
+      .sort((a, b) => b.updated - a.updated),
+  };
+}
+
+export async function loadFeedbackPostById(postId: string): Promise<FeedbackResource<FeedbackPostPayload> | null> {
+  const normalizedPostId = getString(postId);
+
+  if (!normalizedPostId) {
+    return null;
+  }
+
+  const identifier = buildPostIdentifier(normalizedPostId);
+  const resources = normalizeResources(
+    await qdnRequest<unknown>({
+      action: 'SEARCH_QDN_RESOURCES',
+      identifier,
+      includeMetadata: true,
+      includeStatus: true,
+      limit: 20,
+      mode: 'ALL',
+      offset: 0,
+      prefix: false,
+      reverse: true,
+      service: FEEDBACK_SERVICE,
+    }),
+  ).filter((resource) => resource.identifier === identifier);
+
+  for (const resource of resources) {
+    const post = await fetchFeedbackResourceCached<FeedbackPostPayload>(resource, 'post');
+
+    if (post?.payload.id === normalizedPostId) {
+      return post;
+    }
+  }
+
+  return null;
+}
+
+export async function loadFeedbackCommentsPage(
+  options: FeedbackPageOptions = {},
+): Promise<FeedbackCommentsPage> {
+  const page = normalizePageOptions(options, FEEDBACK_COMMENT_PAGE_SIZE);
+  const resources = await searchFeedbackResources(FEEDBACK_COMMENT_PREFIX, page);
+  const comments = await Promise.all(
+    resources.map((resource) => fetchFeedbackResourceCached<FeedbackCommentPayload>(resource, 'comment')),
+  );
+
+  return {
+    ...buildPageInfo(page.offset, page.limit, resources.length),
+    comments: comments
+      .filter((comment): comment is FeedbackResource<FeedbackCommentPayload> => !!comment)
+      .sort((a, b) => b.created - a.created),
+  };
+}
+
+/**
+ * Load one page of comments for a single post. Comment metadata includes
+ * `Reply <postId>`, which lets Core narrow the resource list before fetching
+ * bodies. Payload postId is still checked locally for correctness.
+ */
+export async function loadFeedbackCommentsForPost(
+  postId: string,
+  options: FeedbackPageOptions = {},
+): Promise<FeedbackCommentsPage> {
+  const normalizedPostId = getString(postId);
+  const page = normalizePageOptions(options, FEEDBACK_COMMENT_PAGE_SIZE);
+
+  if (!normalizedPostId) {
+    return {
+      ...buildPageInfo(page.offset, page.limit, 0),
+      comments: [],
+    };
+  }
+
+  const resources = await searchFeedbackResources(FEEDBACK_COMMENT_PREFIX, {
+    ...page,
+    title: `Reply ${normalizedPostId}`,
+  });
+  const comments = await Promise.all(
+    resources.map((resource) => fetchFeedbackResourceCached<FeedbackCommentPayload>(resource, 'comment')),
+  );
+
+  return {
+    ...buildPageInfo(page.offset, page.limit, resources.length),
+    comments: comments
+      .filter(
+        (comment): comment is FeedbackResource<FeedbackCommentPayload> =>
+          !!comment && comment.payload.postId === normalizedPostId,
+      )
+      .sort((a, b) => b.created - a.created),
+  };
+}
+
 export async function loadFeedback(limit = 120) {
   const [postResources, commentResources] = await Promise.all([
-    searchFeedbackResources(FEEDBACK_POST_PREFIX, limit),
-    searchFeedbackResources(FEEDBACK_COMMENT_PREFIX, limit * 2),
+    searchFeedbackResources(FEEDBACK_POST_PREFIX, { limit, offset: 0 }),
+    searchFeedbackResources(FEEDBACK_COMMENT_PREFIX, { limit: limit * 2, offset: 0 }),
   ]);
 
   const [posts, comments] = await Promise.all([
     Promise.all(postResources.map((resource) => fetchFeedbackResourceCached<FeedbackPostPayload>(resource, 'post'))),
     Promise.all(commentResources.map((resource) => fetchFeedbackResourceCached<FeedbackCommentPayload>(resource, 'comment'))),
   ]);
-
-  // Drop cache entries for resources no longer returned (deleted/aged out) so the
-  // cache stays bounded to the live result set.
-  const liveKeys = new Set([...postResources, ...commentResources].map(resourceCacheKey));
-
-  for (const key of feedbackResourceCache.keys()) {
-    if (!liveKeys.has(key)) {
-      feedbackResourceCache.delete(key);
-    }
-  }
 
   return {
     comments: comments
@@ -583,8 +779,8 @@ export async function publishFeedbackPayload(name: string, payload: FeedbackPayl
   // Qortium metadata caps the title at 80 bytes and the description at 240
   // (ArbitraryDataTransactionMetadata). Core silently truncates, but cap here for
   // consistency with the description cap below; the full title stays in the payload.
-  const title = (payload.kind === 'post' ? payload.title : `Reply ${payload.postId}`).slice(0, 80);
-  const description = payload.body.slice(0, 240);
+  const title = truncateUtf8(payload.kind === 'post' ? payload.title : `Reply ${payload.postId}`, 80);
+  const description = truncateUtf8(payload.body, 240);
   const identifier =
     payload.kind === 'post' ? buildPostIdentifier(payload.id) : buildCommentIdentifier(payload.id);
 

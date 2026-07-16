@@ -7,20 +7,26 @@ or reopen them. Post and comment bodies recognize `qdn://`, `home://`, and
 
 ## Current features
 
+- Top-level Feedback, My Apps, New Post, and Developers workspaces.
 - Feed filters for all, open, completed, issues, ideas, orphan comments, and
   apps owned by the selected account.
-- An app dropdown, text search, active/newest/oldest/replies sorting, and
-  incremental 25-item paging.
+- An app dropdown, server-backed text search, active/newest sorting, paged post
+  retrieval, and replies fetched only when a post opens.
 - Registered-name avatars on posts and comments.
 - Per-post detail and reply threads, copyable direct links, and ownership-gated
   edit, delete, complete, and reopen controls.
-- Attachment chips on both posts and comments when an existing feedback payload
-  contains attachment metadata. Media and document attachments use the matching
-  Home viewer action when available, then fall back to a new QDN tab.
+- Up to three public QDN attachments on new posts and replies. Help first
+  publishes and verifies the attachment batch, then publishes the referencing
+  feedback JSON; media and documents open through the matching Home viewer when
+  available.
+- A permanently English Developer Reference documenting the public JSON schema,
+  identifiers, lifecycle, QDN metadata limits, bridge behavior, and copyable
+  publish/search/fetch/delete examples.
+- Explicit preparing, submitting, confirmation, and published states for QDN
+  writes, with optimistic posts/replies retained while confirmation completes.
 
-New posts and comments created by the current composer contain an empty
-attachments array; the app displays attachment references already present in a
-payload but does not upload attachment resources itself.
+Classic, Modern, and Fun all use the full app window responsively. Modern keeps
+wider gutters, while Classic and Fun remain denser.
 
 ## Runtime and QAVS
 
@@ -29,7 +35,7 @@ and publish/delete actions. The plain-browser fallback can read public feedback
 resources from `http://127.0.0.1:24891`; creating, editing, deleting, completing,
 and reopening require Home and a selected account that owns a registered name.
 
-Help is at QAVS `1.4.1`: `1.4` is the minimum Qortium platform level and the
+Help is at QAVS `1.4.2`: `1.4` is the minimum Qortium platform level and the
 patch number is the app release. `vite.config.ts` reads `package.json`, injects
 the visible version, and emits `dist/qortium-app.json` with the name `Help`.
 

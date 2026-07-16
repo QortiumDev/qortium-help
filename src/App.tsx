@@ -2,16 +2,21 @@ import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from
 import {
   AlertCircle,
   ArrowLeft,
+  BookOpen,
   CheckCircle2,
   ChevronDown,
   Circle,
   Check,
   Edit3,
+  ExternalLink,
+  FileText,
+  Inbox,
   Lightbulb,
   Link as LinkIcon,
   ListFilter,
   Loader2,
   MessageSquare,
+  Paperclip,
   Plus,
   RefreshCw,
   Reply,
@@ -24,6 +29,14 @@ import {
 } from 'lucide-react';
 import helpIconUrl from './assets/qortium-help-protoicon-black-transparent.png';
 import { AttachmentList } from './attachments';
+import {
+  formatAttachmentSize,
+  MAX_ATTACHMENT_COUNT,
+  prepareFeedbackAttachment,
+  prepareFeedbackBundle,
+  publishPreparedFeedbackBundle,
+  type PreparedFeedbackAttachment,
+} from './attachmentUpload';
 import { Avatar } from './Avatar';
 import {
   APP_FILTER_ALL,
@@ -47,12 +60,19 @@ import { applyDisplaySettings, getDisplaySettingsUpdateFromMessage, getInitialDi
 import { openAppLinkInHomeTab, renderFeedbackText } from './feedbackLinks';
 import { getBridgeState, hasAction } from './qdnRequest';
 import {
+  buildCommentIdentifier,
+  buildPostIdentifier,
   canOwnResource,
   createCommentPayload,
   createPostPayload,
   deleteFeedbackResource,
+  FEEDBACK_COMMENT_PAGE_SIZE,
+  FEEDBACK_POST_PAGE_SIZE,
   loadAccountContext,
-  loadFeedback,
+  loadFeedbackCommentsPage,
+  loadFeedbackCommentsForPost,
+  loadFeedbackPostById,
+  loadFeedbackPostsPage,
   loadPublishedAppNames,
   publishFeedbackPayload,
   setPostStatusPayload,
@@ -65,13 +85,16 @@ import {
   type FeedbackPostPayload,
   type FeedbackResource,
 } from './qdnFeedback';
+import { waitForFeedbackResourceReady } from './publishStatus';
+import Reference from './Reference';
 import type { BridgeState, QdnAction } from './types';
 
 type LoadState = 'error' | 'loading' | 'ready';
 type FeedFilter = InitialFeedFilter;
-type SortOrder = 'active' | 'newest' | 'oldest' | 'replies';
-const SORT_ORDERS: SortOrder[] = ['active', 'newest', 'oldest', 'replies'];
-type MainView = 'compose' | 'detail' | 'list';
+type SortOrder = 'active' | 'newest';
+const SORT_ORDERS: SortOrder[] = ['active', 'newest'];
+type MainView = 'compose' | 'detail' | 'list' | 'reference';
+type WritePhase = 'idle' | 'pending' | 'preparing' | 'submitting' | 'confirming' | 'published';
 
 type FeedbackData = {
   comments: FeedbackResource<FeedbackCommentPayload>[];
@@ -91,10 +114,6 @@ const emptyBridgeState: BridgeState = {
 
 const FILTERS: FeedFilter[] = ['all', 'open', 'completed', 'issue', 'idea', 'orphan'];
 const APP_VERSION = __APP_VERSION__;
-
-// How many feed items to render before the "Load more" affordance, and how many
-// each click reveals — keeps the rendered list bounded as feedback volume grows.
-const FEED_PAGE_SIZE = 25;
 
 // qortium-core and qortium-home aren't published QDN APP resources, so they never
 // come back from the resource search — seed them into the app dropdown explicitly.
@@ -166,6 +185,30 @@ function LoadingState({ text }: { text: string }) {
       <span>{text}</span>
     </div>
   );
+}
+
+function createOptimisticFeedbackResource(
+  ownerName: string,
+  payload: FeedbackCommentPayload | FeedbackPostPayload,
+): FeedbackResource {
+  const identifier =
+    payload.kind === 'post' ? buildPostIdentifier(payload.id) : buildCommentIdentifier(payload.id);
+
+  return {
+    created: payload.createdAt,
+    identifier,
+    ownerName,
+    payload,
+    resource: {
+      created: payload.createdAt,
+      identifier,
+      latestSignature: null,
+      name: ownerName,
+      service: 'JSON',
+      updated: payload.updatedAt,
+    },
+    updated: payload.updatedAt,
+  };
 }
 
 function IconButton({
@@ -276,24 +319,136 @@ function ConfirmDialog({
   );
 }
 
+function AttachmentPicker({
+  disabled,
+  files,
+  onChange,
+}: {
+  disabled: boolean;
+  files: PreparedFeedbackAttachment[];
+  onChange: (files: PreparedFeedbackAttachment[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState('');
+
+  async function addFiles(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0 || disabled || processing) {
+      return;
+    }
+
+    const available = Math.max(0, MAX_ATTACHMENT_COUNT - files.length);
+    const selected = Array.from(fileList).slice(0, available);
+
+    if (selected.length === 0) {
+      setError(`A maximum of ${MAX_ATTACHMENT_COUNT} attachments is supported.`);
+      return;
+    }
+
+    setProcessing(true);
+    setError('');
+
+    try {
+      const prepared = await Promise.all(selected.map(prepareFeedbackAttachment));
+
+      onChange([...files, ...prepared]);
+    } catch (attachmentError) {
+      setError(getErrorMessage(attachmentError, 'Unable to prepare the selected file.'));
+    } finally {
+      setProcessing(false);
+
+      if (inputRef.current) {
+        inputRef.current.value = '';
+      }
+    }
+  }
+
+  return (
+    <div className="attachment-picker">
+      <input
+        accept="image/*,audio/*,video/*,.pdf,.txt,.md,.zip,.json"
+        className="sr-only"
+        disabled={disabled || processing || files.length >= MAX_ATTACHMENT_COUNT}
+        multiple
+        onChange={(event) => {
+          void addFiles(event.target.files);
+        }}
+        ref={inputRef}
+        type="file"
+      />
+      <div className="attachment-picker__head">
+        <button
+          className="command-button command-button--secondary"
+          disabled={disabled || processing || files.length >= MAX_ATTACHMENT_COUNT}
+          onClick={() => inputRef.current?.click()}
+          type="button"
+        >
+          {processing ? <Loader2 aria-hidden="true" className="spinner" /> : <Paperclip aria-hidden="true" />}
+          <span>{processing ? 'Preparing…' : 'Attach files'}</span>
+        </button>
+        <span className="attachment-picker__note">
+          Public on QDN · up to {MAX_ATTACHMENT_COUNT} files
+        </span>
+      </div>
+      {files.length > 0 ? (
+        <ul className="attachment-picker__list">
+          {files.map((file, index) => (
+            <li key={`${file.filename}:${file.size}:${index}`}>
+              <FileText aria-hidden="true" />
+              <span>
+                <strong>{file.filename}</strong>
+                <small>{formatAttachmentSize(file.size)}</small>
+              </span>
+              <IconButton
+                disabled={disabled}
+                label={`Remove ${file.filename}`}
+                onClick={() => onChange(files.filter((_, fileIndex) => fileIndex !== index))}
+              >
+                <X aria-hidden="true" />
+              </IconButton>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {error ? (
+        <p className="attachment-picker__error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function PostComposer({
   appNames,
+  canAttach,
   canPublish,
   initialApp,
   initialType,
   onCancel,
+  onPublishNameChange,
   onSubmit,
   publishName,
+  publishNames,
   publishing,
   t,
 }: {
   appNames: string[];
+  canAttach: boolean;
   canPublish: boolean;
   initialApp?: string | null;
   initialType?: FeedbackKind;
   onCancel: () => void;
-  onSubmit: (type: FeedbackKind, title: string, body: string, app: string | null) => Promise<boolean>;
+  onPublishNameChange: (name: string) => void;
+  onSubmit: (
+    type: FeedbackKind,
+    title: string,
+    body: string,
+    app: string | null,
+    attachments: PreparedFeedbackAttachment[],
+  ) => Promise<boolean>;
   publishName: string;
+  publishNames: string[];
   publishing: boolean;
   t: ReturnType<typeof createTranslator>;
 }) {
@@ -301,6 +456,7 @@ function PostComposer({
   const [app, setApp] = useState(initialApp ?? '');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [attachments, setAttachments] = useState<PreparedFeedbackAttachment[]>([]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -311,13 +467,14 @@ function PostComposer({
 
     // `app` comes from a fixed dropdown (no stray whitespace); the payload factory
     // is the single place that trims/normalises it, so don't trim again here.
-    const success = await onSubmit(type, title, body, app || null);
+    const success = await onSubmit(type, title, body, app || null, attachments);
 
     if (success) {
       setTitle('');
       setBody('');
       setType(initialType ?? 'issue');
       setApp(initialApp ?? '');
+      setAttachments([]);
     }
   }
 
@@ -368,6 +525,24 @@ function PostComposer({
         </select>
       </label>
       <label>
+        <span>{t('field.name')}</span>
+        <select
+          disabled={publishing || publishNames.length === 0}
+          onChange={(event) => onPublishNameChange(event.target.value)}
+          value={publishName}
+        >
+          {publishNames.length === 0 ? (
+            <option value="">{t('status.noName')}</option>
+          ) : (
+            publishNames.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+      <label>
         <span>{t('field.title')}</span>
         <input
           autoComplete="off"
@@ -388,6 +563,11 @@ function PostComposer({
           value={body}
         />
       </label>
+      <AttachmentPicker
+        disabled={!canAttach || publishing}
+        files={attachments}
+        onChange={setAttachments}
+      />
       <div className="composer__footer">
         <span className="publish-name">{publishName || t('status.noName')}</span>
         <div className="button-row button-row--end">
@@ -419,7 +599,7 @@ function FeedItem({
   post,
   t,
 }: {
-  commentCount: number;
+  commentCount: number | null;
   onSelect: () => void;
   post: FeedbackResource<FeedbackPostPayload>;
   t: ReturnType<typeof createTranslator>;
@@ -448,7 +628,7 @@ function FeedItem({
       </span>
       <span className="reply-count">
         <MessageSquare aria-hidden="true" />
-        {commentCount}
+        {commentCount ?? '—'}
       </span>
     </button>
   );
@@ -528,17 +708,20 @@ function CommentView({
 }
 
 function ReplyComposer({
+  canAttach,
   canPublish,
   onSubmit,
   publishing,
   t,
 }: {
+  canAttach: boolean;
   canPublish: boolean;
-  onSubmit: (body: string) => Promise<boolean>;
+  onSubmit: (body: string, attachments: PreparedFeedbackAttachment[]) => Promise<boolean>;
   publishing: boolean;
   t: ReturnType<typeof createTranslator>;
 }) {
   const [body, setBody] = useState('');
+  const [attachments, setAttachments] = useState<PreparedFeedbackAttachment[]>([]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -547,10 +730,11 @@ function ReplyComposer({
       return;
     }
 
-    const success = await onSubmit(body);
+    const success = await onSubmit(body, attachments);
 
     if (success) {
       setBody('');
+      setAttachments([]);
     }
   }
 
@@ -566,6 +750,11 @@ function ReplyComposer({
           value={body}
         />
       </label>
+      <AttachmentPicker
+        disabled={!canAttach || publishing}
+        files={attachments}
+        onChange={setAttachments}
+      />
       <div className="button-row">
         <CommandButton
           disabled={!canPublish || publishing || !body.trim()}
@@ -616,20 +805,32 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortOrder>('active');
   const [pendingDelete, setPendingDelete] = useState<FeedbackResource | null>(null);
-  const [visibleCount, setVisibleCount] = useState(FEED_PAGE_SIZE);
+  const [postsNextOffset, setPostsNextOffset] = useState<number | null>(null);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [commentsNextOffset, setCommentsNextOffset] = useState<number | null>(null);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [orphanDataLoaded, setOrphanDataLoaded] = useState(false);
+  const [writePhase, setWritePhase] = useState<WritePhase>('idle');
+  const [writeTarget, setWriteTarget] = useState<'comment' | 'post' | null>(null);
   const refreshTokenRef = useRef(0);
+  const commentsTokenRef = useRef(0);
+  const orphanLoadRef = useRef(false);
+  const writeInFlightRef = useRef(false);
+  const writeResetTimerRef = useRef<number | null>(null);
 
   const t = useMemo(() => createTranslator(displaySettings.language), [displaySettings.language]);
   const accountLocked = accountContext.account?.isUnlocked === false;
   const canRequestUnlock = hasAction(bridgeState.actions, 'UNLOCK_SELECTED_ACCOUNT');
   const canUseSelectedAccount = !accountLocked || canRequestUnlock;
   const canPublishResource = canUseSelectedAccount && hasAction(bridgeState.actions, 'PUBLISH_QDN_RESOURCE');
+  const canPublishBundle = canUseSelectedAccount && hasAction(bridgeState.actions, 'PUBLISH_MULTIPLE_QDN_RESOURCES');
   const canPublish =
     !!publishName &&
     canUseSelectedAccount &&
     canPublishResource &&
     accountContext.writableNames.some((name) => name === publishName);
   const canDelete = canUseSelectedAccount && hasAction(bridgeState.actions, 'DELETE_QDN_RESOURCE');
+  const isWriting = writePhase !== 'idle' && writePhase !== 'published' && writePhase !== 'pending';
 
   useLayoutEffect(() => {
     applyDisplaySettings(displaySettings);
@@ -663,6 +864,15 @@ export default function App() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  useEffect(
+    () => () => {
+      if (writeResetTimerRef.current !== null) {
+        window.clearTimeout(writeResetTimerRef.current);
+      }
+    },
+    [],
+  );
+
   async function refreshAccount() {
     setAccountLoaded(false);
     setAccountError(null);
@@ -681,7 +891,7 @@ export default function App() {
     }
   }
 
-  async function refreshFeedback() {
+  async function refreshFeedback(query = search) {
     // Tag this refresh so a slower in-flight load cannot clobber the result of a
     // newer one (e.g. refresh fired again after a publish/delete) (core-1).
     const token = ++refreshTokenRef.current;
@@ -690,21 +900,32 @@ export default function App() {
     setLoadError(null);
 
     try {
-      const nextData = await loadFeedback();
+      const page = await loadFeedbackPostsPage({
+        limit: FEEDBACK_POST_PAGE_SIZE,
+        offset: 0,
+        query: query.trim() || undefined,
+      });
 
       if (token !== refreshTokenRef.current) {
         return;
       }
 
-      setData(nextData);
-      setLoadState('ready');
-      setSelectedPostId((current) => {
-        if (current && nextData.posts.some((post) => post.payload.id === current)) {
-          return current;
-        }
+      setData((current) => {
+        const selectedPost = writeInFlightRef.current && selectedPostId
+          ? current.posts.find((post) => post.payload.id === selectedPostId)
+          : null;
+        const posts =
+          selectedPost && !page.posts.some((post) => post.identifier === selectedPost.identifier)
+            ? [selectedPost, ...page.posts]
+            : page.posts;
 
-        return null;
+        return {
+          comments: current.comments,
+          posts,
+        };
       });
+      setPostsNextOffset(page.nextOffset);
+      setLoadState('ready');
     } catch (error) {
       if (token !== refreshTokenRef.current) {
         return;
@@ -715,17 +936,184 @@ export default function App() {
     }
   }
 
+  async function loadMoreFeedbackPosts() {
+    if (postsNextOffset === null || loadingMorePosts) {
+      return;
+    }
+
+    setLoadingMorePosts(true);
+
+    try {
+      const page = await loadFeedbackPostsPage({
+        limit: FEEDBACK_POST_PAGE_SIZE,
+        offset: postsNextOffset,
+        query: search.trim() || undefined,
+      });
+
+      setData((current) => {
+        const postsByIdentifier = new Map(current.posts.map((post) => [post.identifier, post]));
+
+        for (const post of page.posts) {
+          postsByIdentifier.set(post.identifier, post);
+        }
+
+        return {
+          ...current,
+          posts: [...postsByIdentifier.values()],
+        };
+      });
+      setPostsNextOffset(page.nextOffset);
+    } catch (error) {
+      setLoadError(getErrorMessage(error, t('error.load')));
+    } finally {
+      setLoadingMorePosts(false);
+    }
+  }
+
+  async function loadCommentsForPost(postId: string, append = false) {
+    const token = ++commentsTokenRef.current;
+    const offset = append ? commentsNextOffset ?? 0 : 0;
+
+    setLoadingComments(true);
+
+    try {
+      const page = await loadFeedbackCommentsForPost(postId, {
+        limit: FEEDBACK_COMMENT_PAGE_SIZE,
+        offset,
+      });
+
+      if (token !== commentsTokenRef.current) {
+        return;
+      }
+
+      setData((current) => {
+        const comments = append
+          ? [...current.comments.filter((comment) => comment.payload.postId === postId), ...page.comments]
+          : page.comments;
+        const commentsByIdentifier = new Map(comments.map((comment) => [comment.identifier, comment]));
+
+        return {
+          ...current,
+          comments: [
+            ...current.comments.filter((comment) => comment.payload.postId !== postId),
+            ...commentsByIdentifier.values(),
+          ],
+        };
+      });
+      setCommentsNextOffset(page.nextOffset);
+    } catch (error) {
+      setLoadError(getErrorMessage(error, t('error.load')));
+    } finally {
+      if (token === commentsTokenRef.current) {
+        setLoadingComments(false);
+      }
+    }
+  }
+
+  async function loadAllFeedbackForOrphans() {
+    if (orphanLoadRef.current) {
+      return;
+    }
+
+    orphanLoadRef.current = true;
+    setLoadState('loading');
+    setLoadError(null);
+
+    try {
+      const posts: FeedbackResource<FeedbackPostPayload>[] = [];
+      const comments: FeedbackResource<FeedbackCommentPayload>[] = [];
+      let postsOffset = 0;
+      let commentsOffset = 0;
+
+      for (let pageNumber = 0; pageNumber < 250; pageNumber += 1) {
+        const page = await loadFeedbackPostsPage({
+          limit: FEEDBACK_POST_PAGE_SIZE,
+          offset: postsOffset,
+        });
+
+        posts.push(...page.posts);
+
+        if (!page.hasMore || page.nextOffset === null) {
+          break;
+        }
+
+        postsOffset = page.nextOffset;
+      }
+
+      for (let pageNumber = 0; pageNumber < 250; pageNumber += 1) {
+        const page = await loadFeedbackCommentsPage({
+          limit: FEEDBACK_COMMENT_PAGE_SIZE,
+          offset: commentsOffset,
+        });
+
+        comments.push(...page.comments);
+
+        if (!page.hasMore || page.nextOffset === null) {
+          break;
+        }
+
+        commentsOffset = page.nextOffset;
+      }
+
+      setData({
+        comments: [...new Map(comments.map((comment) => [comment.identifier, comment])).values()],
+        posts: [...new Map(posts.map((post) => [post.identifier, post])).values()],
+      });
+      setPostsNextOffset(null);
+      setOrphanDataLoaded(true);
+      setLoadState('ready');
+    } catch (error) {
+      setLoadState('error');
+      setLoadError(getErrorMessage(error, t('error.load')));
+    } finally {
+      orphanLoadRef.current = false;
+    }
+  }
+
   async function refreshAll() {
     const state = await getBridgeState();
 
     setBridgeState(state);
-    await Promise.all([refreshAccount(), refreshFeedback()]);
+    await Promise.all([
+      refreshAccount(),
+      filter === 'orphan' ? loadAllFeedbackForOrphans() : refreshFeedback(),
+      selectedPostId ? loadCommentsForPost(selectedPostId) : Promise.resolve(),
+    ]);
   }
 
   useEffect(() => {
     void refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (view === 'list' && filter !== 'orphan') {
+        void refreshFeedback(search);
+      }
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+    // The refresh function intentionally reads the current display translator.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, filter, view]);
+
+  useEffect(() => {
+    if (!selectedPostId) {
+      setCommentsNextOffset(null);
+      return;
+    }
+
+    void loadCommentsForPost(selectedPostId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPostId]);
+
+  useEffect(() => {
+    if (filter === 'orphan' && !orphanDataLoaded) {
+      void loadAllFeedbackForOrphans();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, orphanDataLoaded]);
 
   // Resolve a `?post=<id>` deep link once the feed has loaded: open that item if
   // it exists, then drop the pending id so later refreshes don't hijack the view.
@@ -734,12 +1122,31 @@ export default function App() {
       return;
     }
 
-    if (data.posts.some((post) => post.payload.id === pendingPostId)) {
-      setSelectedPostId(pendingPostId);
-      setView('detail');
-    }
+    const requestedPostId = pendingPostId;
+    const loadedPost = data.posts.find((post) => post.payload.id === requestedPostId);
 
     setPendingPostId(null);
+
+    if (loadedPost) {
+      setSelectedPostId(requestedPostId);
+      setView('detail');
+      return;
+    }
+
+    void loadFeedbackPostById(requestedPostId)
+      .then((post) => {
+        if (!post) {
+          return;
+        }
+
+        setData((current) => ({
+          ...current,
+          posts: [post, ...current.posts.filter((candidate) => candidate.identifier !== post.identifier)],
+        }));
+        setSelectedPostId(post.payload.id);
+        setView('detail');
+      })
+      .catch((error) => setLoadError(getErrorMessage(error, t('error.load'))));
   }, [pendingPostId, loadState, data.posts]);
 
   useEffect(() => {
@@ -860,25 +1267,13 @@ export default function App() {
     switch (sort) {
       case 'newest':
         return posts.sort((a, b) => b.payload.createdAt - a.payload.createdAt);
-      case 'oldest':
-        return posts.sort((a, b) => a.payload.createdAt - b.payload.createdAt);
-      case 'replies':
-        return posts.sort(
-          (a, b) => (commentsByPostId.get(b.payload.id)?.length ?? 0) - (commentsByPostId.get(a.payload.id)?.length ?? 0),
-        );
       default:
         return posts.sort((a, b) => b.updated - a.updated);
     }
-  }, [searchedPosts, sort, commentsByPostId]);
+  }, [searchedPosts, sort]);
 
-  // Reset the visible window whenever the result set changes (filter switch, new
-  // search term, sort change, or a refresh) so "Load more" always starts at the top.
-  useEffect(() => {
-    setVisibleCount(FEED_PAGE_SIZE);
-  }, [selectedAppFilter, filter, normalizedSearch, sort, data.posts]);
-
-  const visiblePosts = sortedPosts.slice(0, visibleCount);
-  const hasMorePosts = sortedPosts.length > visiblePosts.length;
+  const visiblePosts = sortedPosts;
+  const hasMorePosts = loadState === 'ready' && postsNextOffset !== null;
 
   const selectedPost = data.posts.find((post) => post.payload.id === selectedPostId) ?? null;
   const selectedComments = selectedPost ? commentsByPostId.get(selectedPost.payload.id) ?? [] : [];
@@ -939,8 +1334,15 @@ export default function App() {
   }
 
   function selectFilter(value: FeedFilter) {
+    const leavingOrphans = filter === 'orphan' && value !== 'orphan';
+
     setFilter(value);
     setView('list');
+
+    if (leavingOrphans) {
+      setOrphanDataLoaded(false);
+      void refreshFeedback(search);
+    }
   }
 
   function selectAppFilter(value: AppFilterValue) {
@@ -975,10 +1377,29 @@ export default function App() {
     }
   }
 
-  async function publishAndRefresh(payload: Parameters<typeof publishFeedbackPayload>[1], name = publishName) {
-    setBusy(true);
+  async function publishAndRefresh(
+    payload: Parameters<typeof publishFeedbackPayload>[1],
+    name = publishName,
+    attachments: PreparedFeedbackAttachment[] = [],
+  ) {
+    let optimisticResource: FeedbackResource | null = null;
+    let replacedResource: FeedbackResource | null = null;
+
+    if (writeInFlightRef.current) {
+      return false;
+    }
+
+    writeInFlightRef.current = true;
 
     try {
+      if (writeResetTimerRef.current !== null) {
+        window.clearTimeout(writeResetTimerRef.current);
+        writeResetTimerRef.current = null;
+      }
+
+      setWritePhase('idle');
+      setWriteTarget(null);
+
       if (!name) {
         setLoadError(t('status.noName'));
         return false;
@@ -990,20 +1411,136 @@ export default function App() {
         return false;
       }
 
-      await publishFeedbackPayload(name, payload);
-      await refreshFeedback();
-      setSelectedPostId(payload.kind === 'post' ? payload.id : payload.postId);
+      let payloadToPublish = payload;
+      let preparedBundle: ReturnType<typeof prepareFeedbackBundle> | null = null;
+
+      setWriteTarget(payload.kind);
+
+      if (attachments.length > 0) {
+        if (!canPublishBundle) {
+          throw new Error('This Qortium Home version cannot publish attachment bundles.');
+        }
+
+        setWritePhase('preparing');
+        preparedBundle = prepareFeedbackBundle(name, payload, attachments);
+        payloadToPublish = preparedBundle.payload;
+      }
+
+      optimisticResource = createOptimisticFeedbackResource(name, payloadToPublish);
+      replacedResource =
+        (payloadToPublish.kind === 'post' ? data.posts : data.comments).find(
+          (resource) => resource.identifier === optimisticResource?.identifier,
+        ) ?? null;
+      setData((current) => {
+        const collection = payloadToPublish.kind === 'post' ? current.posts : current.comments;
+
+        const nextCollection = [
+          optimisticResource!,
+          ...collection.filter((resource) => resource.identifier !== optimisticResource?.identifier),
+        ];
+
+        return payloadToPublish.kind === 'post'
+          ? { ...current, posts: nextCollection as FeedbackResource<FeedbackPostPayload>[] }
+          : { ...current, comments: nextCollection as FeedbackResource<FeedbackCommentPayload>[] };
+      });
+
+      setWritePhase('submitting');
+
+      if (preparedBundle) {
+        await publishPreparedFeedbackBundle(preparedBundle);
+      }
+
+      // Publish the referencing JSON only after every attachment was accepted.
+      // This prevents a feedback post from pointing at an attachment whose
+      // publication already failed.
+      const publishResult = await publishFeedbackPayload(name, payloadToPublish);
+
+      setWritePhase('confirming');
+
+      if (payloadToPublish.kind === 'post' && !replacedResource) {
+        setSelectedPostId(payloadToPublish.id);
+        setView('detail');
+      }
+
+      const identifier =
+        payloadToPublish.kind === 'post'
+          ? buildPostIdentifier(payloadToPublish.id)
+          : buildCommentIdentifier(payloadToPublish.id);
+
+      const confirmed = await waitForFeedbackResourceReady({
+        expectedSignature: publishResult.transactionSignature,
+        identifier,
+        minimumUpdatedAt: payloadToPublish.updatedAt,
+        name,
+        previousSignature:
+          typeof replacedResource?.resource.latestSignature === 'string'
+            ? replacedResource.resource.latestSignature
+            : '',
+      });
+
+      if (confirmed && payloadToPublish.kind === 'comment') {
+        await loadCommentsForPost(payloadToPublish.postId);
+      }
+
+      if (confirmed && payloadToPublish.kind === 'post') {
+        const confirmedPost = await loadFeedbackPostById(payloadToPublish.id);
+
+        if (confirmedPost) {
+          setData((current) => ({
+            ...current,
+            posts: [
+              confirmedPost,
+              ...current.posts.filter((post) => post.identifier !== confirmedPost.identifier),
+            ],
+          }));
+        }
+      }
+
+      setSelectedPostId(payloadToPublish.kind === 'post' ? payloadToPublish.id : payloadToPublish.postId);
+
+      setWritePhase(confirmed ? 'published' : 'pending');
+      writeResetTimerRef.current = window.setTimeout(() => {
+        setWritePhase('idle');
+        setWriteTarget(null);
+        writeResetTimerRef.current = null;
+      }, confirmed ? 2200 : 5000);
       return true;
     } catch (error) {
+      if (optimisticResource) {
+        setData((current) => {
+          const collection =
+            optimisticResource?.payload.kind === 'post' ? current.posts : current.comments;
+          const restored = replacedResource
+            ? [replacedResource, ...collection.filter((resource) => resource.identifier !== replacedResource?.identifier)]
+            : collection.filter((resource) => resource.identifier !== optimisticResource?.identifier);
+
+          return optimisticResource?.payload.kind === 'post'
+            ? { ...current, posts: restored as FeedbackResource<FeedbackPostPayload>[] }
+            : { ...current, comments: restored as FeedbackResource<FeedbackCommentPayload>[] };
+        });
+      }
+
       setLoadError(getErrorMessage(error, t('error.publish')));
+      setWritePhase('idle');
+      setWriteTarget(null);
       return false;
     } finally {
-      setBusy(false);
+      writeInFlightRef.current = false;
     }
   }
 
-  async function handleCreatePost(type: FeedbackKind, title: string, body: string, app: string | null) {
-    const success = await publishAndRefresh(createPostPayload(type, title, body, canonicalAppName(app)));
+  async function handleCreatePost(
+    type: FeedbackKind,
+    title: string,
+    body: string,
+    app: string | null,
+    attachments: PreparedFeedbackAttachment[],
+  ) {
+    const success = await publishAndRefresh(
+      createPostPayload(type, title, body, canonicalAppName(app)),
+      publishName,
+      attachments,
+    );
 
     if (success) {
       setView('detail');
@@ -1012,12 +1549,12 @@ export default function App() {
     return success;
   }
 
-  async function handleCreateComment(body: string) {
+  async function handleCreateComment(body: string, attachments: PreparedFeedbackAttachment[]) {
     if (!selectedPost) {
       return false;
     }
 
-    return publishAndRefresh(createCommentPayload(selectedPost.payload.id, body));
+    return publishAndRefresh(createCommentPayload(selectedPost.payload.id, body), publishName, attachments);
   }
 
   async function handleToggleStatus(post: FeedbackResource<FeedbackPostPayload>) {
@@ -1104,10 +1641,21 @@ export default function App() {
 
       await deleteFeedbackResource(resource);
       setPendingDelete(null);
-      await refreshFeedback();
+
       if (resource.payload.kind === 'post') {
         setSelectedPostId(null);
         setView('list');
+        setData((current) => ({
+          ...current,
+          posts: current.posts.filter((post) => post.identifier !== resource.identifier),
+        }));
+        await refreshFeedback();
+      } else {
+        setData((current) => ({
+          ...current,
+          comments: current.comments.filter((comment) => comment.identifier !== resource.identifier),
+        }));
+        await loadCommentsForPost(resource.payload.postId);
       }
     } catch (error) {
       setLoadError(getErrorMessage(error, t('error.delete')));
@@ -1120,16 +1668,38 @@ export default function App() {
     switch (value) {
       case 'newest':
         return t('sort.newest');
-      case 'oldest':
-        return t('sort.oldest');
-      case 'replies':
-        return t('sort.replies');
       default:
         return t('sort.active');
     }
   }
 
+  function getWriteStatusText() {
+    switch (writePhase) {
+      case 'preparing':
+        return 'Preparing attachments…';
+      case 'submitting':
+        return 'Submitting to QDN…';
+      case 'confirming':
+        return 'Awaiting QDN confirmation…';
+      case 'pending':
+        return 'Submitted, but QDN confirmation is still pending.';
+      case 'published':
+        return 'Published to QDN.';
+      default:
+        return '';
+    }
+  }
+
+  const activeTab =
+    view === 'reference'
+      ? 'reference'
+      : view === 'compose'
+        ? 'compose'
+        : filter === 'myApps'
+          ? 'myApps'
+          : 'feedback';
   const showList = view === 'list' || (view === 'detail' && !selectedPost);
+  const showSidebar = view !== 'compose' && view !== 'reference';
 
   return (
     <main className="app-shell">
@@ -1154,19 +1724,59 @@ export default function App() {
           <IconButton disabled={busy || loadState === 'loading'} label={t('action.refresh')} onClick={() => void refreshAll()}>
             <RefreshCw aria-hidden="true" />
           </IconButton>
-          <CommandButton disabled={busy} icon={<Plus aria-hidden="true" />} onClick={openComposer} variant="primary">
-            {t('action.newPost')}
-          </CommandButton>
         </div>
       </header>
 
-      <section className="workspace">
-        <aside className="sidebar">
+      <nav aria-label="Help sections" className="app-tabs">
+        <button
+          aria-current={activeTab === 'feedback' ? 'page' : undefined}
+          className={`app-tab ${activeTab === 'feedback' ? 'is-active' : ''}`}
+          onClick={() => {
+            selectFilter('all');
+          }}
+          type="button"
+        >
+          <Inbox aria-hidden="true" />
+          <span>{t('label.feedback')}</span>
+        </button>
+        <button
+          aria-current={activeTab === 'myApps' ? 'page' : undefined}
+          className={`app-tab ${activeTab === 'myApps' ? 'is-active' : ''}`}
+          onClick={() => {
+            selectFilter('myApps');
+          }}
+          type="button"
+        >
+          <ListFilter aria-hidden="true" />
+          <span>{t('filter.myApps')}</span>
+        </button>
+        <button
+          aria-current={activeTab === 'compose' ? 'page' : undefined}
+          className={`app-tab ${activeTab === 'compose' ? 'is-active' : ''}`}
+          onClick={openComposer}
+          type="button"
+        >
+          <Plus aria-hidden="true" />
+          <span>{t('action.newPost')}</span>
+        </button>
+        <button
+          aria-current={activeTab === 'reference' ? 'page' : undefined}
+          className={`app-tab ${activeTab === 'reference' ? 'is-active' : ''}`}
+          onClick={() => setView('reference')}
+          type="button"
+        >
+          <BookOpen aria-hidden="true" />
+          <span>Developers</span>
+        </button>
+      </nav>
+
+      <section className={`workspace ${showSidebar ? '' : 'workspace--single'}`}>
+        {showSidebar ? <aside className="sidebar">
           <div className="account-strip">
             <label>
               <span>{t('field.name')}</span>
               <select
-                disabled={busy || accountContext.writableNames.length === 0}
+                disabled={busy || isWriting || accountContext.writableNames.length === 0}
                 onChange={(event) => setPublishName(event.target.value)}
                 value={publishName}
               >
@@ -1214,7 +1824,11 @@ export default function App() {
                 type="button"
               >
                 <span>{getFilterLabel(value)}</span>
-                <span className="count-pill">{loadState === 'loading' ? '—' : filterCounts[value]}</span>
+                <span className="count-pill">
+                  {loadState === 'loading' || (value === 'orphan' && !orphanDataLoaded)
+                    ? '—'
+                    : filterCounts[value]}
+                </span>
               </button>
             ))}
           </nav>
@@ -1224,9 +1838,17 @@ export default function App() {
               {accountError}
             </div>
           ) : null}
-        </aside>
+        </aside> : null}
 
         <section className="main-panel">
+          {writePhase !== 'idle' ? (
+            <div
+              className={`notice ${writePhase === 'published' ? 'notice--success' : 'notice--link'}`}
+              role="status"
+            >
+              {getWriteStatusText()}
+            </div>
+          ) : null}
           {loadError ? (
             <div className="notice notice--error" role="alert">
               <span className="notice__text">{loadError}</span>
@@ -1245,16 +1867,21 @@ export default function App() {
             </div>
           ) : null}
 
+          {view === 'reference' ? <Reference /> : null}
+
           {view === 'compose' ? (
             <PostComposer
               appNames={appNames}
+              canAttach={canPublishBundle}
               canPublish={canPublish}
               initialApp={composer.app}
               initialType={composer.type ?? undefined}
               onCancel={backToList}
+              onPublishNameChange={setPublishName}
               onSubmit={handleCreatePost}
               publishName={publishName}
-              publishing={busy}
+              publishNames={accountContext.writableNames}
+              publishing={isWriting && writeTarget === 'post'}
               t={t}
             />
           ) : null}
@@ -1300,26 +1927,34 @@ export default function App() {
                       <span>{formatRelativeTime(selectedPost.updated)}</span>
                       {selectedPost.payload.updatedAt > selectedPost.payload.createdAt ? <span>{t('label.edited')}</span> : null}
                       {selectedPost.payload.app ? (
-                        <button
-                          aria-label={`${t('action.openApp')}: ${selectedPost.payload.app}`}
-                          className="app-pill app-pill--button"
-                          onClick={() => {
-                            void openAppLinkInHomeTab(`qdn://APP/${selectedPost.payload.app}`).catch((error) => {
-                              console.warn('Unable to open app.', error);
-                            });
-                          }}
-                          title={t('action.openApp')}
-                          type="button"
-                        >
-                          {selectedPost.payload.app}
-                        </button>
+                        <>
+                          <button
+                            aria-label={`${t('field.app')}: ${selectedPost.payload.app}`}
+                            className="app-pill app-pill--button"
+                            onClick={() => selectAppFilter(selectedPost.payload.app ?? APP_FILTER_ALL)}
+                            title={t('label.feedback')}
+                            type="button"
+                          >
+                            {selectedPost.payload.app}
+                          </button>
+                          <IconButton
+                            label={`${t('action.openApp')}: ${selectedPost.payload.app}`}
+                            onClick={() => {
+                              void openAppLinkInHomeTab(`qdn://APP/${selectedPost.payload.app}`).catch((error) => {
+                                console.warn('Unable to open app.', error);
+                              });
+                            }}
+                          >
+                            <ExternalLink aria-hidden="true" />
+                          </IconButton>
+                        </>
                       ) : null}
                     </div>
                   </div>
                   {canPublishResource && canOwnResource(selectedPost, accountContext.writableNames) ? (
                     <div className="item-actions">
                       <IconButton
-                        disabled={busy}
+                        disabled={busy || isWriting}
                         label={selectedPost.payload.status === 'done' ? t('action.reopen') : t('action.complete')}
                         onClick={() => void handleToggleStatus(selectedPost)}
                         variant={selectedPost.payload.status === 'done' ? 'ghost' : 'primary'}
@@ -1334,7 +1969,7 @@ export default function App() {
                         <Edit3 aria-hidden="true" />
                       </IconButton>
                       <IconButton
-                        disabled={busy || !canDelete}
+                        disabled={busy || isWriting || !canDelete}
                         label={t('action.delete')}
                         onClick={() => setPendingDelete(selectedPost)}
                         variant="danger"
@@ -1369,7 +2004,7 @@ export default function App() {
                     </div>
                     <select
                       className="edit-app-select"
-                      disabled={busy}
+                      disabled={busy || isWriting}
                       onChange={(event) => setPostEditApp(event.target.value)}
                       value={postEditApp}
                     >
@@ -1385,22 +2020,22 @@ export default function App() {
                     </select>
                     <input
                       autoFocus
-                      disabled={busy}
+                      disabled={busy || isWriting}
                       maxLength={120}
                       onChange={(event) => setPostEditTitle(event.target.value)}
                       value={postEditTitle}
                     />
-                    <textarea disabled={busy} onChange={(event) => setPostEditBody(event.target.value)} rows={7} value={postEditBody} />
+                    <textarea disabled={busy || isWriting} onChange={(event) => setPostEditBody(event.target.value)} rows={7} value={postEditBody} />
                     <div className="button-row">
                       <CommandButton
-                        disabled={busy || !canPublishResource || !postEditTitle.trim() || !postEditBody.trim()}
+                        disabled={busy || isWriting || !canPublishResource || !postEditTitle.trim() || !postEditBody.trim()}
                         icon={<Save aria-hidden="true" />}
                         onClick={() => void savePostEdit(selectedPost)}
                         variant="primary"
                       >
                         {t('action.save')}
                       </CommandButton>
-                      <CommandButton disabled={busy} icon={<X aria-hidden="true" />} onClick={cancelPostEdit}>
+                      <CommandButton disabled={busy || isWriting} icon={<X aria-hidden="true" />} onClick={cancelPostEdit}>
                         {t('action.cancel')}
                       </CommandButton>
                     </div>
@@ -1418,7 +2053,14 @@ export default function App() {
                   <span className="section-title">{t('label.replies')}</span>
                   <span className="count-pill">{selectedComments.length}</span>
                 </div>
-                <ReplyComposer canPublish={canPublish} onSubmit={handleCreateComment} publishing={busy} t={t} />
+                <ReplyComposer
+                  canAttach={canPublishBundle}
+                  canPublish={canPublish}
+                  onSubmit={handleCreateComment}
+                  publishing={isWriting && writeTarget === 'comment'}
+                  t={t}
+                />
+                {loadingComments ? <LoadingState text={t('label.loading')} /> : null}
                 <div className="comments-list">
                   {selectedComments.length === 0 ? <EmptyState text={t('empty.comments')} /> : null}
                   {selectedComments.map((comment) => (
@@ -1442,6 +2084,21 @@ export default function App() {
                     />
                   ))}
                 </div>
+                {commentsNextOffset !== null ? (
+                  <div className="load-more">
+                    <CommandButton
+                      disabled={loadingComments}
+                      icon={<ChevronDown aria-hidden="true" />}
+                      onClick={() => {
+                        if (selectedPost) {
+                          void loadCommentsForPost(selectedPost.payload.id, true);
+                        }
+                      }}
+                    >
+                      {loadingComments ? t('label.loading') : t('action.loadMore')}
+                    </CommandButton>
+                  </div>
+                ) : null}
               </section>
             </div>
           ) : null}
@@ -1486,7 +2143,11 @@ export default function App() {
                 {filter !== 'orphan' && filter !== 'myApps'
                   ? visiblePosts.map((post) => (
                       <FeedItem
-                        commentCount={commentsByPostId.get(post.payload.id)?.length ?? 0}
+                        commentCount={
+                          commentsByPostId.has(post.payload.id)
+                            ? commentsByPostId.get(post.payload.id)?.length ?? 0
+                            : null
+                        }
                         key={post.identifier}
                         onSelect={() => openDetail(post.payload.id)}
                         post={post}
@@ -1497,10 +2158,11 @@ export default function App() {
                 {filter !== 'orphan' && filter !== 'myApps' && hasMorePosts ? (
                   <div className="load-more">
                     <CommandButton
+                      disabled={loadingMorePosts}
                       icon={<ChevronDown aria-hidden="true" />}
-                      onClick={() => setVisibleCount((count) => count + FEED_PAGE_SIZE)}
+                      onClick={() => void loadMoreFeedbackPosts()}
                     >
-                      {t('action.loadMore')}
+                      {loadingMorePosts ? t('label.loading') : t('action.loadMore')}
                     </CommandButton>
                   </div>
                 ) : null}
@@ -1520,7 +2182,11 @@ export default function App() {
                         <span className="app-group__label">{appName}</span>
                         {posts.map((post) => (
                           <FeedItem
-                            commentCount={commentsByPostId.get(post.payload.id)?.length ?? 0}
+                            commentCount={
+                              commentsByPostId.has(post.payload.id)
+                                ? commentsByPostId.get(post.payload.id)?.length ?? 0
+                                : null
+                            }
                             key={post.identifier}
                             onSelect={() => openDetail(post.payload.id)}
                             post={post}
@@ -1530,6 +2196,17 @@ export default function App() {
                       </div>
                     ))
                   : null}
+                {filter === 'myApps' && hasMorePosts ? (
+                  <div className="load-more">
+                    <CommandButton
+                      disabled={loadingMorePosts}
+                      icon={<ChevronDown aria-hidden="true" />}
+                      onClick={() => void loadMoreFeedbackPosts()}
+                    >
+                      {loadingMorePosts ? t('label.loading') : t('action.loadMore')}
+                    </CommandButton>
+                  </div>
+                ) : null}
                 {filter === 'orphan' && orphanComments.length === 0 ? <EmptyState text={t('empty.orphans')} /> : null}
                 {filter === 'orphan'
                   ? orphanComments.map((comment) => (

@@ -87,7 +87,6 @@ export function parseHelpNotificationRules(value: unknown): HelpNotificationRule
       entry.filters.service !== 'JSON' ||
       entry.filters.identifier !== FEEDBACK_COMMENT_PREFIX ||
       entry.filters.title !== `Reply ${postId}` ||
-      entry.filters.prefix !== true ||
       entry.filters.excludeBlocked !== true ||
       typeof after !== 'number' ||
       !Number.isFinite(after)
@@ -153,7 +152,6 @@ export async function buildHelpReplyNotification({
       after,
       excludeBlocked: true,
       identifier: FEEDBACK_COMMENT_PREFIX,
-      prefix: true,
       service: 'JSON',
       title: `Reply ${normalizedPostId}`,
     },

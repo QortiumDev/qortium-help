@@ -69,7 +69,6 @@ await window.qdnRequest({
       service: 'JSON',
       identifier: 'qhelp.feedback.v1.c.',
       title: \`Reply \${postId}\`,
-      prefix: true,
       excludeBlocked: true,
       after: Date.now(),
     },

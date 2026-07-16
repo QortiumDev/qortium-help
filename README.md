@@ -43,7 +43,7 @@ and publish/delete actions. The plain-browser fallback can read public feedback
 resources from `http://127.0.0.1:24891`; creating, editing, deleting, completing,
 and reopening require Home and a selected account that owns a registered name.
 
-Help is at QAVS `1.4.5`: `1.4` is the minimum Qortium platform level and the
+Help is at QAVS `1.4.6`: `1.4` is the minimum Qortium platform level and the
 patch number is the app release. `vite.config.ts` reads `package.json`, injects
 the visible version, and emits `dist/qortium-app.json` with the name `Help`.
 
@@ -113,6 +113,8 @@ prefill accepts only `issue` or `idea`.
 Inside a compatible Qortium Home, open a feedback thread and choose
 **Follow replies**. Help registers one `RESOURCE_PUBLISHED` rule using the
 comment identifier prefix and the thread's `Reply <postId>` metadata title.
+The rule deliberately omits Home's currently broken boolean `prefix` option;
+Core's default substring matching still requires both complete marker strings.
 Following is always explicit; posting or replying never enables it
 automatically. The header bell lists followed threads and provides open and
 unfollow controls. Help supports up to Home's limit of 20 rules.

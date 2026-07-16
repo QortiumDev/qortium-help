@@ -70,6 +70,21 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'field.search': '搜尋意見回饋',
   'label.publishingHint': '正在發布到 QDN — 網路確認時可能需要一點時間。',
   'status.publishing': '發布中…',
+  'action.follow': '關注回覆',
+  'action.notifications': '回覆通知',
+  'action.unfollow': '取消關注',
+  'error.notificationLimit': 'Help 最多可關注 {limit} 個主題。',
+  'error.notifications': '通知更新失敗',
+  'error.notificationThread': '該關注主題已無法使用。',
+  'notification.rule.text': '開啟 Help 閱讀回覆。',
+  'notification.rule.title': 'Help 中的回覆動態',
+  'notification.accountRequired': '請在 Home 中選擇帳戶以關注回覆。',
+  'notification.settings.capacity': '已關注 {used}/{limit}',
+  'notification.settings.empty': '關注主題以接收回覆動態。',
+  'notification.settings.permission': '關注主題時，Home 會要求通知權限。',
+  'notification.settings.scope': 'Home 執行時會監控關注的主題。',
+  'notification.settings.title': '關注的主題',
+  'notification.thread': '主題 {id}',
 };
 
 export default MESSAGES;

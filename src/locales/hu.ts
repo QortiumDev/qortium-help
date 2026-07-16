@@ -69,6 +69,21 @@ const MESSAGES: Partial<Record<keyof typeof EN_STRINGS, string>> = {
   'sort.oldest': 'Legrégebbi',
   'sort.replies': 'Legtöbb válasz',
   'label.publishingHint': 'Közzététel QDN-re — ez eltarthat egy ideig, amíg a hálózat megerősíti.',
+  'action.follow': 'Válaszok követése',
+  'action.notifications': 'Válaszértesítések',
+  'action.unfollow': 'Követés leállítása',
+  'error.notificationLimit': 'A Help legfeljebb {limit} témát követhet.',
+  'error.notifications': 'Az értesítés frissítése sikertelen',
+  'error.notificationThread': 'A követett téma már nem érhető el.',
+  'notification.rule.text': 'A válasz elolvasásához nyisd meg a Helpet.',
+  'notification.rule.title': 'Választevékenység a Helpben',
+  'notification.accountRequired': 'A válaszok követéséhez válassz fiókot a Home-ban.',
+  'notification.settings.capacity': '{used}/{limit} követve',
+  'notification.settings.empty': 'Kövess egy témát a választevékenységhez.',
+  'notification.settings.permission': 'A követéskor a Home értesítési engedélyt kér.',
+  'notification.settings.scope': 'A Home futás közben figyeli a követett témákat.',
+  'notification.settings.title': 'Követett témák',
+  'notification.thread': 'Téma {id}',
   'time.now': 'Most'
 };
 

@@ -13,8 +13,12 @@ import {
   buildCommentIdentifier,
   buildPostIdentifier,
   buildWritableNames,
+  createCommentPayload,
+  createPostPayload,
   getCommentIdFromIdentifier,
   getPostIdFromIdentifier,
+  isFeedbackResourceEdited,
+  loadFeedbackCommentCounts,
   loadFeedbackCommentsForPost,
   loadFeedbackCommentsPage,
   loadFeedbackPostById,
@@ -201,6 +205,40 @@ describe('paged feedback loading', () => {
     expect(page.nextOffset).toBeNull();
   });
 
+  it('counts exact reply metadata without downloading comment payloads', async () => {
+    const matchingOne = {
+      ...resource(buildCommentIdentifier('matching-one'), 'matching-one-signature'),
+      metadata: { title: 'Reply post-123' },
+    };
+    const matchingTwo = {
+      ...resource(buildCommentIdentifier('matching-two'), 'matching-two-signature'),
+      metadata: { title: 'Reply post-123' },
+    };
+    const titlePrefixFalsePositive = {
+      ...resource(buildCommentIdentifier('false-positive'), 'false-positive-signature'),
+      metadata: { title: 'Reply post-123-extra' },
+    };
+
+    qdnRequestMock.mockResolvedValue([matchingOne, matchingTwo, titlePrefixFalsePositive]);
+
+    await expect(loadFeedbackCommentCounts(['post-123', 'post-123'])).resolves.toEqual({
+      'post-123': 2,
+    });
+    expect(qdnRequestMock).toHaveBeenCalledTimes(1);
+    expect(qdnRequestMock).toHaveBeenCalledWith({
+      action: 'SEARCH_QDN_RESOURCES',
+      identifier: 'qhelp.feedback.v1.c.',
+      includeMetadata: true,
+      limit: 0,
+      mode: 'ALL',
+      offset: 0,
+      prefix: true,
+      reverse: true,
+      service: 'JSON',
+      title: 'Reply post-123',
+    });
+  });
+
   it('reuses a cached payload only while latestSignature is unchanged', async () => {
     let latestSignature = 'cache-signature-one';
     let fetchCount = 0;
@@ -271,6 +309,66 @@ describe('paged feedback loading', () => {
 });
 
 describe('feedback updates', () => {
+  it('uses QDN revision metadata rather than draft timing to label edits', () => {
+    const payload = {
+      ...commentPayload('comment-123', 'post-123'),
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    };
+    const newlyPublished = {
+      created: 2_000,
+      identifier: buildCommentIdentifier(payload.id),
+      ownerName: 'QuickMythril',
+      payload,
+      resource: {
+        ...resource(buildCommentIdentifier(payload.id), 'new-signature', 2_000),
+        updated: undefined,
+      },
+      updated: 2_000,
+    };
+    const revised = {
+      ...newlyPublished,
+      resource: {
+        ...newlyPublished.resource,
+        created: 2_000,
+        updated: 3_000,
+      },
+      updated: 3_000,
+    };
+
+    expect(isFeedbackResourceEdited(newlyPublished)).toBe(false);
+    expect(isFeedbackResourceEdited(revised)).toBe(true);
+  });
+
+  it('reuses a supplied draft identity across publication retries', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(2_000);
+    const identity = { createdAt: 1_000, id: 'stable-draft' };
+
+    expect(createPostPayload('issue', 'Title', 'Body', 'Help', identity)).toMatchObject({
+      createdAt: 1_000,
+      id: 'stable-draft',
+      updatedAt: 1_000,
+    });
+    expect(createCommentPayload('post123', 'Reply', identity)).toMatchObject({
+      createdAt: 1_000,
+      id: 'stable-draft',
+      postId: 'post123',
+      updatedAt: 1_000,
+    });
+  });
+
+  it('does not mark brand-new posts or replies as edited', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(2_000);
+
+    const post = createPostPayload('issue', 'Title', 'Body');
+    const comment = createCommentPayload(post.id, 'Reply');
+
+    expect(post.updatedAt).toBe(post.createdAt);
+    expect(comment.updatedAt).toBe(comment.createdAt);
+  });
+
   it('updates post content while preserving identity', () => {
     vi.useFakeTimers();
     vi.setSystemTime(2_000);

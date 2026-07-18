@@ -56,6 +56,11 @@ export type FeedbackCommentPayload = {
 
 export type FeedbackPayload = FeedbackPostPayload | FeedbackCommentPayload;
 
+export type FeedbackDraftIdentity = {
+  createdAt: number;
+  id: string;
+};
+
 export type FeedbackResource<T extends FeedbackPayload = FeedbackPayload> = {
   created: number;
   identifier: string;
@@ -95,6 +100,15 @@ export type FeedbackPostsPage = FeedbackPageInfo & {
 export type FeedbackCommentsPage = FeedbackPageInfo & {
   comments: FeedbackResource<FeedbackCommentPayload>[];
 };
+
+export type FeedbackCommentCounts = Record<string, number>;
+
+export function isFeedbackResourceEdited(resource: FeedbackResource) {
+  const resourceCreated = resource.resource.created ?? resource.payload.createdAt;
+  const resourceUpdated = resource.resource.updated;
+
+  return typeof resourceUpdated === 'number' && resourceUpdated > resourceCreated;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -558,6 +572,63 @@ export async function loadFeedbackCommentsForPost(
   };
 }
 
+async function loadFeedbackCommentCount(postId: string) {
+  const normalizedPostId = getString(postId);
+
+  if (!normalizedPostId) {
+    return 0;
+  }
+
+  const expectedTitle = `Reply ${normalizedPostId}`;
+  const resources = normalizeResources(
+    await qdnRequest<unknown>({
+      action: 'SEARCH_QDN_RESOURCES',
+      identifier: FEEDBACK_COMMENT_PREFIX,
+      includeMetadata: true,
+      limit: 0,
+      mode: 'ALL',
+      offset: 0,
+      prefix: true,
+      reverse: true,
+      service: FEEDBACK_SERVICE,
+      title: expectedTitle,
+    }),
+  );
+
+  return resources.filter(
+    (resource) =>
+      resource.identifier?.startsWith(FEEDBACK_COMMENT_PREFIX) &&
+      resource.metadata?.title === expectedTitle,
+  ).length;
+}
+
+/**
+ * Count replies for visible posts without downloading reply payload bodies.
+ * Each metadata-only query is exact-checked locally because Core's title
+ * filtering is prefix-based when the identifier prefix is also requested.
+ */
+export async function loadFeedbackCommentCounts(postIds: string[]): Promise<FeedbackCommentCounts> {
+  const uniquePostIds = [...new Set(postIds.map(getString).filter(Boolean))];
+  const counts: FeedbackCommentCounts = {};
+  let nextIndex = 0;
+  const workerCount = Math.min(6, uniquePostIds.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < uniquePostIds.length) {
+        const index = nextIndex;
+
+        nextIndex += 1;
+        const postId = uniquePostIds[index];
+
+        counts[postId] = await loadFeedbackCommentCount(postId);
+      }
+    }),
+  );
+
+  return counts;
+}
+
 export async function loadFeedback(limit = 120) {
   const [postResources, commentResources] = await Promise.all([
     searchFeedbackResources(FEEDBACK_POST_PREFIX, { limit, offset: 0 }),
@@ -710,38 +781,45 @@ export function createPostPayload(
   title: string,
   body: string,
   app?: string | null,
+  identity?: FeedbackDraftIdentity,
 ): FeedbackPostPayload {
-  const id = createFeedbackId();
   const now = Date.now();
+  const id = identity?.id ?? createFeedbackId();
+  const createdAt = identity?.createdAt ?? now;
 
   return {
     app: app?.trim() || null,
     attachments: [],
     body: normalizeBody(body),
-    createdAt: now,
+    createdAt,
     id,
     kind: 'post',
     schema: FEEDBACK_SCHEMA,
     status: 'open',
     title: title.trim(),
     type,
-    updatedAt: now,
+    updatedAt: createdAt,
   };
 }
 
-export function createCommentPayload(postId: string, body: string): FeedbackCommentPayload {
-  const id = createFeedbackId();
+export function createCommentPayload(
+  postId: string,
+  body: string,
+  identity?: FeedbackDraftIdentity,
+): FeedbackCommentPayload {
   const now = Date.now();
+  const id = identity?.id ?? createFeedbackId();
+  const createdAt = identity?.createdAt ?? now;
 
   return {
     attachments: [],
     body: normalizeBody(body),
-    createdAt: now,
+    createdAt,
     id,
     kind: 'comment',
     postId,
     schema: FEEDBACK_SCHEMA,
-    updatedAt: now,
+    updatedAt: createdAt,
   };
 }
 

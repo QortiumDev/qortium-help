@@ -1,4 +1,5 @@
 import { qdnRequest } from './qdnRequest';
+import type { PublishedQdnResource } from './attachmentUpload';
 import type { QdnResource } from './types';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -93,4 +94,27 @@ export async function waitForFeedbackResourceReady({
   }
 
   return false;
+}
+
+export async function waitForPublishedResourcesReady(
+  published: PublishedQdnResource[],
+  timeoutMs = 10 * 60_000,
+) {
+  if (published.length === 0) {
+    return true;
+  }
+
+  const results = await Promise.all(
+    published.map((entry) =>
+      waitForFeedbackResourceReady({
+        expectedSignature: entry.transactionSignature,
+        identifier: entry.resource.identifier ?? '',
+        name: entry.resource.name,
+        service: entry.resource.service,
+        timeoutMs,
+      }),
+    ),
+  );
+
+  return results.every(Boolean);
 }

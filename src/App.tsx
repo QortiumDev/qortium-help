@@ -2,6 +2,9 @@ import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from
 import {
   AlertCircle,
   ArrowLeft,
+  Bell,
+  BellOff,
+  BellRing,
   BookOpen,
   CheckCircle2,
   ChevronDown,
@@ -51,6 +54,7 @@ import {
   buildPostLink,
   getInitialAppFilter,
   getInitialComposerParams,
+  getInitialDeveloperReferenceRequested,
   getInitialFeedFilter,
   getInitialNewPostRequested,
   getInitialPostId,
@@ -64,11 +68,14 @@ import {
   buildPostIdentifier,
   canOwnResource,
   createCommentPayload,
+  createFeedbackId,
   createPostPayload,
   deleteFeedbackResource,
   FEEDBACK_COMMENT_PAGE_SIZE,
   FEEDBACK_POST_PAGE_SIZE,
+  isFeedbackResourceEdited,
   loadAccountContext,
+  loadFeedbackCommentCounts,
   loadFeedbackCommentsPage,
   loadFeedbackCommentsForPost,
   loadFeedbackPostById,
@@ -80,12 +87,25 @@ import {
   updateCommentPayload,
   updatePostPayload,
   type AccountContext,
+  type FeedbackCommentCounts,
   type FeedbackCommentPayload,
+  type FeedbackDraftIdentity,
   type FeedbackKind,
   type FeedbackPostPayload,
   type FeedbackResource,
 } from './qdnFeedback';
-import { waitForFeedbackResourceReady } from './publishStatus';
+import { waitForFeedbackResourceReady, waitForPublishedResourcesReady } from './publishStatus';
+import {
+  canManageHelpNotifications,
+  followHelpPost,
+  getHelpNotificationState,
+  hasHelpNotificationCapacity,
+  HELP_NOTIFICATION_RULE_LIMIT,
+  reconcileHelpNotifications,
+  unfollowHelpPost,
+  type HelpNotificationRule,
+  type HelpNotificationState,
+} from './notifications';
 import Reference from './Reference';
 import type { BridgeState, QdnAction } from './types';
 
@@ -94,7 +114,14 @@ type FeedFilter = InitialFeedFilter;
 type SortOrder = 'active' | 'newest';
 const SORT_ORDERS: SortOrder[] = ['active', 'newest'];
 type MainView = 'compose' | 'detail' | 'list' | 'reference';
-type WritePhase = 'idle' | 'pending' | 'preparing' | 'submitting' | 'confirming' | 'published';
+type WritePhase =
+  | 'confirming'
+  | 'confirming-attachments'
+  | 'idle'
+  | 'pending'
+  | 'preparing'
+  | 'published'
+  | 'submitting';
 
 type FeedbackData = {
   comments: FeedbackResource<FeedbackCommentPayload>[];
@@ -114,6 +141,13 @@ const emptyBridgeState: BridgeState = {
 
 const FILTERS: FeedFilter[] = ['all', 'open', 'completed', 'issue', 'idea', 'orphan'];
 const APP_VERSION = __APP_VERSION__;
+
+function createDraftIdentity(): FeedbackDraftIdentity {
+  return {
+    createdAt: Date.now(),
+    id: createFeedbackId(),
+  };
+}
 
 // qortium-core and qortium-home aren't published QDN APP resources, so they never
 // come back from the resource search — seed them into the app dropdown explicitly.
@@ -214,6 +248,8 @@ function createOptimisticFeedbackResource(
 function IconButton({
   children,
   disabled,
+  expanded,
+  hasPopup,
   label,
   onClick,
   type = 'button',
@@ -221,6 +257,8 @@ function IconButton({
 }: {
   children: React.ReactNode;
   disabled?: boolean;
+  expanded?: boolean;
+  hasPopup?: 'dialog' | 'menu';
   label: string;
   onClick?: () => void;
   type?: 'button' | 'submit';
@@ -228,6 +266,8 @@ function IconButton({
 }) {
   return (
     <button
+      aria-expanded={expanded}
+      aria-haspopup={hasPopup}
       aria-label={label}
       className={`icon-button icon-button--${variant}`}
       disabled={disabled}
@@ -245,6 +285,7 @@ function CommandButton({
   disabled,
   icon,
   onClick,
+  pressed,
   type = 'button',
   variant = 'secondary',
 }: {
@@ -252,11 +293,18 @@ function CommandButton({
   disabled?: boolean;
   icon?: React.ReactNode;
   onClick?: () => void;
+  pressed?: boolean;
   type?: 'button' | 'submit';
   variant?: 'danger' | 'primary' | 'secondary';
 }) {
   return (
-    <button className={`command-button command-button--${variant}`} disabled={disabled} onClick={onClick} type={type}>
+    <button
+      aria-pressed={pressed}
+      className={`command-button command-button--${variant}`}
+      disabled={disabled}
+      onClick={onClick}
+      type={type}
+    >
       {icon}
       <span>{children}</span>
     </button>
@@ -446,6 +494,7 @@ function PostComposer({
     body: string,
     app: string | null,
     attachments: PreparedFeedbackAttachment[],
+    identity: FeedbackDraftIdentity,
   ) => Promise<boolean>;
   publishName: string;
   publishNames: string[];
@@ -457,6 +506,7 @@ function PostComposer({
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [attachments, setAttachments] = useState<PreparedFeedbackAttachment[]>([]);
+  const [draftIdentity, setDraftIdentity] = useState<FeedbackDraftIdentity | null>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -467,7 +517,13 @@ function PostComposer({
 
     // `app` comes from a fixed dropdown (no stray whitespace); the payload factory
     // is the single place that trims/normalises it, so don't trim again here.
-    const success = await onSubmit(type, title, body, app || null, attachments);
+    const identity = draftIdentity ?? createDraftIdentity();
+
+    if (!draftIdentity) {
+      setDraftIdentity(identity);
+    }
+
+    const success = await onSubmit(type, title, body, app || null, attachments, identity);
 
     if (success) {
       setTitle('');
@@ -475,6 +531,7 @@ function PostComposer({
       setType(initialType ?? 'issue');
       setApp(initialApp ?? '');
       setAttachments([]);
+      setDraftIdentity(null);
     }
   }
 
@@ -599,12 +656,12 @@ function FeedItem({
   post,
   t,
 }: {
-  commentCount: number | null;
+  commentCount: number;
   onSelect: () => void;
   post: FeedbackResource<FeedbackPostPayload>;
   t: ReturnType<typeof createTranslator>;
 }) {
-  const edited = post.payload.updatedAt > post.payload.createdAt;
+  const edited = isFeedbackResourceEdited(post);
   const completed = post.payload.status === 'done';
 
   return (
@@ -628,7 +685,7 @@ function FeedItem({
       </span>
       <span className="reply-count">
         <MessageSquare aria-hidden="true" />
-        {commentCount ?? '—'}
+        {commentCount}
       </span>
     </button>
   );
@@ -667,7 +724,7 @@ function CommentView({
         <Avatar name={comment.ownerName} size={24} />
         <span>{getDisplayName(comment.ownerName)}</span>
         <span>{formatRelativeTime(comment.updated)}</span>
-        {comment.payload.updatedAt > comment.payload.createdAt ? <span>{t('label.edited')}</span> : null}
+        {isFeedbackResourceEdited(comment) ? <span>{t('label.edited')}</span> : null}
       </div>
       {editing ? (
         <div className="edit-box">
@@ -716,12 +773,17 @@ function ReplyComposer({
 }: {
   canAttach: boolean;
   canPublish: boolean;
-  onSubmit: (body: string, attachments: PreparedFeedbackAttachment[]) => Promise<boolean>;
+  onSubmit: (
+    body: string,
+    attachments: PreparedFeedbackAttachment[],
+    identity: FeedbackDraftIdentity,
+  ) => Promise<boolean>;
   publishing: boolean;
   t: ReturnType<typeof createTranslator>;
 }) {
   const [body, setBody] = useState('');
   const [attachments, setAttachments] = useState<PreparedFeedbackAttachment[]>([]);
+  const [draftIdentity, setDraftIdentity] = useState<FeedbackDraftIdentity | null>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -730,11 +792,18 @@ function ReplyComposer({
       return;
     }
 
-    const success = await onSubmit(body, attachments);
+    const identity = draftIdentity ?? createDraftIdentity();
+
+    if (!draftIdentity) {
+      setDraftIdentity(identity);
+    }
+
+    const success = await onSubmit(body, attachments, identity);
 
     if (success) {
       setBody('');
       setAttachments([]);
+      setDraftIdentity(null);
     }
   }
 
@@ -776,6 +845,7 @@ export default function App() {
   const [accountLoaded, setAccountLoaded] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [data, setData] = useState<FeedbackData>(emptyData);
+  const [commentCounts, setCommentCounts] = useState<FeedbackCommentCounts>({});
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FeedFilter>(() =>
@@ -785,7 +855,13 @@ export default function App() {
     getInitialPostId() || getInitialNewPostRequested() ? APP_FILTER_ALL : getInitialAppFilter() ?? APP_FILTER_ALL,
   );
   const [view, setView] = useState<MainView>(() =>
-    getInitialPostId() ? 'list' : getInitialNewPostRequested() ? 'compose' : 'list',
+    getInitialDeveloperReferenceRequested()
+      ? 'reference'
+      : getInitialPostId()
+        ? 'list'
+        : getInitialNewPostRequested()
+          ? 'compose'
+          : 'list',
   );
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [publishName, setPublishName] = useState('');
@@ -812,11 +888,21 @@ export default function App() {
   const [orphanDataLoaded, setOrphanDataLoaded] = useState(false);
   const [writePhase, setWritePhase] = useState<WritePhase>('idle');
   const [writeTarget, setWriteTarget] = useState<'comment' | 'post' | null>(null);
+  const [notificationRules, setNotificationRules] = useState<HelpNotificationRule[]>([]);
+  const [notificationGranted, setNotificationGranted] = useState(false);
+  const [notificationBusy, setNotificationBusy] = useState(false);
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const refreshTokenRef = useRef(0);
   const commentsTokenRef = useRef(0);
   const orphanLoadRef = useRef(false);
   const writeInFlightRef = useRef(false);
   const writeResetTimerRef = useRef<number | null>(null);
+  const searchRefreshInitializedRef = useRef(false);
+  const notificationMenuRef = useRef<HTMLDivElement>(null);
+  const notificationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const notificationOperationCountRef = useRef(0);
+  const notificationGenerationRef = useRef(0);
 
   const t = useMemo(() => createTranslator(displaySettings.language), [displaySettings.language]);
   const accountLocked = accountContext.account?.isUnlocked === false;
@@ -830,11 +916,24 @@ export default function App() {
     canPublishResource &&
     accountContext.writableNames.some((name) => name === publishName);
   const canDelete = canUseSelectedAccount && hasAction(bridgeState.actions, 'DELETE_QDN_RESOURCE');
+  const canManageNotifications = canManageHelpNotifications(bridgeState.actions);
   const isWriting = writePhase !== 'idle' && writePhase !== 'published' && writePhase !== 'pending';
 
   useLayoutEffect(() => {
     applyDisplaySettings(displaySettings);
   }, [displaySettings]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+
+    if (view === 'reference') {
+      url.searchParams.set('view', 'developers');
+    } else {
+      url.searchParams.delete('view');
+    }
+
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [view]);
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
@@ -849,6 +948,9 @@ export default function App() {
       setDisplaySettings((current) => getDisplaySettingsUpdateFromMessage(event.data, current) ?? current);
 
       if (isSelectedAccountChangedMessage(event.data)) {
+        // Invalidate an in-flight passive reconciliation immediately, before
+        // the async account refresh makes the new address visible to React.
+        notificationGenerationRef.current += 1;
         // Re-fetch the bridge action set too: Home applies a node-mode switch
         // instantly, which changes whether write actions (publish/delete) are
         // offered, so the gating controls must update in-session (showactions-1).
@@ -873,6 +975,32 @@ export default function App() {
     [],
   );
 
+  useEffect(() => {
+    if (!notificationMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!notificationMenuRef.current?.contains(event.target as Node)) {
+        setNotificationMenuOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setNotificationMenuOpen(false);
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [notificationMenuOpen]);
+
   async function refreshAccount() {
     setAccountLoaded(false);
     setAccountError(null);
@@ -891,12 +1019,55 @@ export default function App() {
     }
   }
 
-  async function refreshFeedback(query = search) {
+  function getNotificationCopy(text = t('notification.rule.text')) {
+    return {
+      text,
+      title: t('notification.rule.title'),
+    };
+  }
+
+  function queueNotificationOperation(
+    operation: () => Promise<HelpNotificationState>,
+    generation = notificationGenerationRef.current,
+  ) {
+    notificationOperationCountRef.current += 1;
+    setNotificationBusy(true);
+
+    const next = notificationQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        try {
+          setNotificationError(null);
+          const state = await operation();
+
+          if (generation === notificationGenerationRef.current) {
+            setNotificationGranted(state.granted);
+            setNotificationRules(state.rules);
+          }
+        } catch (error) {
+          setNotificationError(getErrorMessage(error, t('error.notifications')));
+        } finally {
+          notificationOperationCountRef.current -= 1;
+
+          if (notificationOperationCountRef.current === 0) {
+            setNotificationBusy(false);
+          }
+        }
+      });
+
+    notificationQueueRef.current = next;
+
+    return next;
+  }
+
+  async function refreshFeedback(query = search, showLoading = false) {
     // Tag this refresh so a slower in-flight load cannot clobber the result of a
     // newer one (e.g. refresh fired again after a publish/delete) (core-1).
     const token = ++refreshTokenRef.current;
 
-    setLoadState('loading');
+    if (showLoading) {
+      setLoadState('loading');
+    }
     setLoadError(null);
 
     try {
@@ -905,6 +1076,7 @@ export default function App() {
         offset: 0,
         query: query.trim() || undefined,
       });
+      const counts = await loadFeedbackCommentCounts(page.posts.map((post) => post.payload.id));
 
       if (token !== refreshTokenRef.current) {
         return;
@@ -924,6 +1096,7 @@ export default function App() {
           posts,
         };
       });
+      setCommentCounts((current) => ({ ...current, ...counts }));
       setPostsNextOffset(page.nextOffset);
       setLoadState('ready');
     } catch (error) {
@@ -931,7 +1104,9 @@ export default function App() {
         return;
       }
 
-      setLoadState('error');
+      if (showLoading) {
+        setLoadState('error');
+      }
       setLoadError(getErrorMessage(error, t('error.load')));
     }
   }
@@ -949,6 +1124,7 @@ export default function App() {
         offset: postsNextOffset,
         query: search.trim() || undefined,
       });
+      const counts = await loadFeedbackCommentCounts(page.posts.map((post) => post.payload.id));
 
       setData((current) => {
         const postsByIdentifier = new Map(current.posts.map((post) => [post.identifier, post]));
@@ -962,6 +1138,7 @@ export default function App() {
           posts: [...postsByIdentifier.values()],
         };
       });
+      setCommentCounts((current) => ({ ...current, ...counts }));
       setPostsNextOffset(page.nextOffset);
     } catch (error) {
       setLoadError(getErrorMessage(error, t('error.load')));
@@ -977,10 +1154,13 @@ export default function App() {
     setLoadingComments(true);
 
     try {
-      const page = await loadFeedbackCommentsForPost(postId, {
-        limit: FEEDBACK_COMMENT_PAGE_SIZE,
-        offset,
-      });
+      const [page, counts] = await Promise.all([
+        loadFeedbackCommentsForPost(postId, {
+          limit: FEEDBACK_COMMENT_PAGE_SIZE,
+          offset,
+        }),
+        loadFeedbackCommentCounts([postId]),
+      ]);
 
       if (token !== commentsTokenRef.current) {
         return;
@@ -1000,6 +1180,7 @@ export default function App() {
           ],
         };
       });
+      setCommentCounts((current) => ({ ...current, ...counts }));
       setCommentsNextOffset(page.nextOffset);
     } catch (error) {
       setLoadError(getErrorMessage(error, t('error.load')));
@@ -1059,6 +1240,12 @@ export default function App() {
         comments: [...new Map(comments.map((comment) => [comment.identifier, comment])).values()],
         posts: [...new Map(posts.map((post) => [post.identifier, post])).values()],
       });
+      const counts = comments.reduce<FeedbackCommentCounts>((result, comment) => {
+        result[comment.payload.postId] = (result[comment.payload.postId] ?? 0) + 1;
+        return result;
+      }, {});
+
+      setCommentCounts(counts);
       setPostsNextOffset(null);
       setOrphanDataLoaded(true);
       setLoadState('ready');
@@ -1076,7 +1263,7 @@ export default function App() {
     setBridgeState(state);
     await Promise.all([
       refreshAccount(),
-      filter === 'orphan' ? loadAllFeedbackForOrphans() : refreshFeedback(),
+      filter === 'orphan' ? loadAllFeedbackForOrphans() : refreshFeedback(search, true),
       selectedPostId ? loadCommentsForPost(selectedPostId) : Promise.resolve(),
     ]);
   }
@@ -1087,8 +1274,42 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const generation = notificationGenerationRef.current + 1;
+    notificationGenerationRef.current = generation;
+
+    if (!canManageNotifications) {
+      setNotificationGranted(false);
+      setNotificationRules([]);
+      setNotificationMenuOpen(false);
+      return;
+    }
+
+    if (!accountContext.account?.address) {
+      void queueNotificationOperation(() => getHelpNotificationState(), generation);
+      return;
+    }
+
+    void queueNotificationOperation(
+      () => reconcileHelpNotifications(
+        getNotificationCopy(),
+        undefined,
+        () => generation === notificationGenerationRef.current,
+      ),
+      generation,
+    );
+    // Re-registering is intentionally tied to selected-account and language
+    // changes. The operation first checks Home's grant and never prompts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManageNotifications, accountContext.account?.address, displaySettings.language]);
+
+  useEffect(() => {
+    if (!searchRefreshInitializedRef.current) {
+      searchRefreshInitializedRef.current = true;
+      return;
+    }
+
     const timer = window.setTimeout(() => {
-      if (view === 'list' && filter !== 'orphan') {
+      if (filter !== 'orphan') {
         void refreshFeedback(search);
       }
     }, 350);
@@ -1096,7 +1317,7 @@ export default function App() {
     return () => window.clearTimeout(timer);
     // The refresh function intentionally reads the current display translator.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filter, view]);
+  }, [search]);
 
   useEffect(() => {
     if (!selectedPostId) {
@@ -1277,6 +1498,10 @@ export default function App() {
 
   const selectedPost = data.posts.find((post) => post.payload.id === selectedPostId) ?? null;
   const selectedComments = selectedPost ? commentsByPostId.get(selectedPost.payload.id) ?? [] : [];
+  const followedPostIds = useMemo(
+    () => new Set(notificationRules.map((rule) => rule.postId)),
+    [notificationRules],
+  );
 
   function getFilterLabel(value: FeedFilter) {
     switch (value) {
@@ -1443,16 +1668,33 @@ export default function App() {
           ? { ...current, posts: nextCollection as FeedbackResource<FeedbackPostPayload>[] }
           : { ...current, comments: nextCollection as FeedbackResource<FeedbackCommentPayload>[] };
       });
+      if (payloadToPublish.kind === 'comment' && !replacedResource) {
+        setCommentCounts((current) => ({
+          ...current,
+          [payloadToPublish.postId]: (current[payloadToPublish.postId] ?? 0) + 1,
+        }));
+      }
 
       setWritePhase('submitting');
 
       if (preparedBundle) {
-        await publishPreparedFeedbackBundle(preparedBundle);
+        const attachmentsResult = await publishPreparedFeedbackBundle(preparedBundle);
+        setWritePhase('confirming-attachments');
+
+        const attachmentsReady = await waitForPublishedResourcesReady(attachmentsResult.published ?? []);
+
+        if (!attachmentsReady) {
+          throw new Error(
+            'Attachments were submitted but are still awaiting QDN confirmation. Their stable resource identifiers will be reused if you retry.',
+          );
+        }
+
+        setWritePhase('submitting');
       }
 
-      // Publish the referencing JSON only after every attachment was accepted.
-      // This prevents a feedback post from pointing at an attachment whose
-      // publication already failed.
+      // Publish the referencing JSON only after every attachment is READY.
+      // A retry reuses the same feedback and attachment identifiers, avoiding
+      // duplicate public resources when the final JSON step fails.
       const publishResult = await publishFeedbackPayload(name, payloadToPublish);
 
       setWritePhase('confirming');
@@ -1518,6 +1760,14 @@ export default function App() {
             ? { ...current, posts: restored as FeedbackResource<FeedbackPostPayload>[] }
             : { ...current, comments: restored as FeedbackResource<FeedbackCommentPayload>[] };
         });
+        if (optimisticResource.payload.kind === 'comment' && !replacedResource) {
+          const postId = optimisticResource.payload.postId;
+
+          setCommentCounts((current) => ({
+            ...current,
+            [postId]: Math.max(0, (current[postId] ?? 1) - 1),
+          }));
+        }
       }
 
       setLoadError(getErrorMessage(error, t('error.publish')));
@@ -1535,9 +1785,10 @@ export default function App() {
     body: string,
     app: string | null,
     attachments: PreparedFeedbackAttachment[],
+    identity: FeedbackDraftIdentity,
   ) {
     const success = await publishAndRefresh(
-      createPostPayload(type, title, body, canonicalAppName(app)),
+      createPostPayload(type, title, body, canonicalAppName(app), identity),
       publishName,
       attachments,
     );
@@ -1549,12 +1800,20 @@ export default function App() {
     return success;
   }
 
-  async function handleCreateComment(body: string, attachments: PreparedFeedbackAttachment[]) {
+  async function handleCreateComment(
+    body: string,
+    attachments: PreparedFeedbackAttachment[],
+    identity: FeedbackDraftIdentity,
+  ) {
     if (!selectedPost) {
       return false;
     }
 
-    return publishAndRefresh(createCommentPayload(selectedPost.payload.id, body), publishName, attachments);
+    return publishAndRefresh(
+      createCommentPayload(selectedPost.payload.id, body, identity),
+      publishName,
+      attachments,
+    );
   }
 
   async function handleToggleStatus(post: FeedbackResource<FeedbackPostPayload>) {
@@ -1573,6 +1832,53 @@ export default function App() {
       // Clipboard blocked (e.g. insecure context): surface the link in its own
       // neutral, dismissible notice to copy by hand — not the red error banner.
       setCopyFallback(buildPostLink(post.payload.id));
+    }
+  }
+
+  function handleToggleFollow(post: FeedbackResource<FeedbackPostPayload>) {
+    const followed = followedPostIds.has(post.payload.id);
+
+    if (!followed && !accountContext.account?.address) {
+      setNotificationError(t('notification.accountRequired'));
+      return;
+    }
+
+    if (!followed && !hasHelpNotificationCapacity(notificationRules)) {
+      setNotificationError(t('error.notificationLimit', { limit: HELP_NOTIFICATION_RULE_LIMIT }));
+      return;
+    }
+
+    void queueNotificationOperation(() => (
+      followed
+        ? unfollowHelpPost(post.payload.id)
+        : followHelpPost(post.payload.id, getNotificationCopy(post.payload.title))
+    ));
+  }
+
+  async function openFollowedThread(postId: string) {
+    setNotificationMenuOpen(false);
+    const loadedPost = data.posts.find((post) => post.payload.id === postId);
+
+    if (loadedPost) {
+      openDetail(postId);
+      return;
+    }
+
+    try {
+      const post = await loadFeedbackPostById(postId);
+
+      if (!post) {
+        setNotificationError(t('error.notificationThread'));
+        return;
+      }
+
+      setData((current) => ({
+        ...current,
+        posts: [post, ...current.posts.filter((candidate) => candidate.identifier !== post.identifier)],
+      }));
+      openDetail(postId);
+    } catch (error) {
+      setNotificationError(getErrorMessage(error, t('error.notificationThread')));
     }
   }
 
@@ -1643,6 +1949,11 @@ export default function App() {
       setPendingDelete(null);
 
       if (resource.payload.kind === 'post') {
+        if (followedPostIds.has(resource.payload.id) && canManageNotifications) {
+          // Notification cleanup is deliberately best effort. The confirmed QDN
+          // deletion remains successful even if Home cannot remove the rule.
+          void queueNotificationOperation(() => unfollowHelpPost(resource.payload.id));
+        }
         setSelectedPostId(null);
         setView('list');
         setData((current) => ({
@@ -1679,6 +1990,8 @@ export default function App() {
         return 'Preparing attachments…';
       case 'submitting':
         return 'Submitting to QDN…';
+      case 'confirming-attachments':
+        return 'Awaiting attachment confirmation…';
       case 'confirming':
         return 'Awaiting QDN confirmation…';
       case 'pending':
@@ -1715,6 +2028,74 @@ export default function App() {
           </div>
         </div>
         <div className="topbar__actions">
+          {canManageNotifications ? (
+            <div className="notification-settings" ref={notificationMenuRef}>
+              <IconButton
+                expanded={notificationMenuOpen}
+                hasPopup="dialog"
+                label={t('action.notifications')}
+                onClick={() => setNotificationMenuOpen((open) => !open)}
+                variant={notificationRules.length > 0 ? 'primary' : 'ghost'}
+              >
+                {notificationRules.length > 0 ? <BellRing aria-hidden="true" /> : <Bell aria-hidden="true" />}
+              </IconButton>
+              {notificationMenuOpen ? (
+                <div
+                  aria-label={t('action.notifications')}
+                  className="notification-settings__popover"
+                  role="dialog"
+                >
+                  <div className="notification-settings__heading">
+                    <strong>{t('notification.settings.title')}</strong>
+                    <span>
+                      {t('notification.settings.capacity', {
+                        limit: HELP_NOTIFICATION_RULE_LIMIT,
+                        used: notificationRules.length,
+                      })}
+                    </span>
+                  </div>
+                  <p className="notification-settings__scope">
+                    {notificationGranted
+                      ? t('notification.settings.scope')
+                      : t('notification.settings.permission')}
+                  </p>
+                  {notificationRules.length > 0 ? (
+                    <ul className="notification-settings__list">
+                      {notificationRules.map((rule) => {
+                        const post = data.posts.find((candidate) => candidate.payload.id === rule.postId);
+
+                        return (
+                          <li key={rule.notificationId}>
+                            <button
+                              className="notification-settings__thread"
+                              onClick={() => void openFollowedThread(rule.postId)}
+                              type="button"
+                            >
+                              {post?.payload.title || rule.text || t('notification.thread', { id: rule.postId })}
+                            </button>
+                            <IconButton
+                              disabled={notificationBusy}
+                              label={t('action.unfollow')}
+                              onClick={() => {
+                                void queueNotificationOperation(() => unfollowHelpPost(rule.postId));
+                              }}
+                            >
+                              <BellOff aria-hidden="true" />
+                            </IconButton>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="notification-settings__empty">{t('notification.settings.empty')}</p>
+                  )}
+                  {notificationError ? (
+                    <p className="notification-settings__error" role="alert">{notificationError}</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <StatusPill tone={bridgeState.isHomeBridge ? 'good' : 'neutral'}>
             {bridgeState.isHomeBridge ? t('label.home') : t('label.local')}
           </StatusPill>
@@ -1858,6 +2239,15 @@ export default function App() {
             </div>
           ) : null}
 
+          {notificationError && !notificationMenuOpen ? (
+            <div className="notice notice--error" role="alert">
+              <span className="notice__text">{notificationError}</span>
+              <IconButton label={t('action.cancel')} onClick={() => setNotificationError(null)} variant="ghost">
+                <X aria-hidden="true" />
+              </IconButton>
+            </div>
+          ) : null}
+
           {copyFallback ? (
             <div className="notice notice--link" role="status">
               <span className="notice__text">{copyFallback}</span>
@@ -1894,6 +2284,26 @@ export default function App() {
                 </IconButton>
                 <span className="section-title">{t('label.feedback')}</span>
                 <div className="panel-bar__end">
+                  {canManageNotifications ? (
+                    <CommandButton
+                      disabled={
+                        notificationBusy ||
+                        (!followedPostIds.has(selectedPost.payload.id) && !accountContext.account?.address)
+                      }
+                      icon={followedPostIds.has(selectedPost.payload.id)
+                        ? <BellOff aria-hidden="true" />
+                        : <Bell aria-hidden="true" />}
+                      onClick={() => handleToggleFollow(selectedPost)}
+                      pressed={followedPostIds.has(selectedPost.payload.id)}
+                      variant={followedPostIds.has(selectedPost.payload.id) ? 'primary' : 'secondary'}
+                    >
+                      {followedPostIds.has(selectedPost.payload.id)
+                        ? t('action.unfollow')
+                        : accountContext.account?.address
+                          ? t('action.follow')
+                          : t('notification.accountRequired')}
+                    </CommandButton>
+                  ) : null}
                   <CommandButton
                     icon={copied ? <Check aria-hidden="true" /> : <LinkIcon aria-hidden="true" />}
                     onClick={() => void handleCopyLink(selectedPost)}
@@ -1925,7 +2335,7 @@ export default function App() {
                       <Avatar name={selectedPost.ownerName} size={28} />
                       <span>{getDisplayName(selectedPost.ownerName)}</span>
                       <span>{formatRelativeTime(selectedPost.updated)}</span>
-                      {selectedPost.payload.updatedAt > selectedPost.payload.createdAt ? <span>{t('label.edited')}</span> : null}
+                      {isFeedbackResourceEdited(selectedPost) ? <span>{t('label.edited')}</span> : null}
                       {selectedPost.payload.app ? (
                         <>
                           <button
@@ -2144,9 +2554,9 @@ export default function App() {
                   ? visiblePosts.map((post) => (
                       <FeedItem
                         commentCount={
-                          commentsByPostId.has(post.payload.id)
-                            ? commentsByPostId.get(post.payload.id)?.length ?? 0
-                            : null
+                          commentCounts[post.payload.id] ??
+                          commentsByPostId.get(post.payload.id)?.length ??
+                          0
                         }
                         key={post.identifier}
                         onSelect={() => openDetail(post.payload.id)}
@@ -2183,9 +2593,9 @@ export default function App() {
                         {posts.map((post) => (
                           <FeedItem
                             commentCount={
-                              commentsByPostId.has(post.payload.id)
-                                ? commentsByPostId.get(post.payload.id)?.length ?? 0
-                                : null
+                              commentCounts[post.payload.id] ??
+                              commentsByPostId.get(post.payload.id)?.length ??
+                              0
                             }
                             key={post.identifier}
                             onSelect={() => openDetail(post.payload.id)}

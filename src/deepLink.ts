@@ -18,6 +18,7 @@ export const POST_QUERY_PARAM = 'post';
 export const APP_QUERY_PARAM = 'app';
 export const NEW_QUERY_PARAM = 'new';
 export const TYPE_QUERY_PARAM = 'type';
+export const VIEW_QUERY_PARAM = 'view';
 
 export type InitialFeedFilter = 'all' | 'completed' | 'idea' | 'issue' | 'myApps' | 'open' | 'orphan';
 
@@ -97,6 +98,13 @@ export function getInitialNewPostRequested(search?: string): boolean {
   const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
 
   return new URLSearchParams(raw).has(NEW_QUERY_PARAM);
+}
+
+export function getInitialDeveloperReferenceRequested(search?: string): boolean {
+  const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
+  const value = new URLSearchParams(raw).get(VIEW_QUERY_PARAM)?.trim().toLowerCase();
+
+  return value === 'developer' || value === 'developers' || value === 'reference';
 }
 
 export function getInitialAppFilter(search?: string): string | null {

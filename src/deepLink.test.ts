@@ -4,6 +4,7 @@ import {
   getAppBaseAddress,
   getInitialAppFilter,
   getInitialComposerParams,
+  getInitialDeveloperReferenceRequested,
   getInitialFeedFilter,
   getInitialNewPostRequested,
   getInitialPostId,
@@ -29,6 +30,14 @@ describe('deep links', () => {
     expect(getInitialNewPostRequested('?new=Wallet')).toBe(true);
     expect(getInitialNewPostRequested('?app=Wallet')).toBe(false);
     expect(getInitialNewPostRequested('')).toBe(false);
+  });
+
+  it('detects developer reference deep links from the query string', () => {
+    expect(getInitialDeveloperReferenceRequested('?view=developers')).toBe(true);
+    expect(getInitialDeveloperReferenceRequested('?view=reference&theme=dark')).toBe(true);
+    expect(getInitialDeveloperReferenceRequested('?view=developer')).toBe(true);
+    expect(getInitialDeveloperReferenceRequested('?view=feedback')).toBe(false);
+    expect(getInitialDeveloperReferenceRequested('')).toBe(false);
   });
 
   it('reads composer pre-fill params from new post links', () => {

@@ -16,7 +16,7 @@ export const REFERENCE_SNIPPETS = {
     {
       "service": "IMAGE",
       "name": "ReporterName",
-      "identifier": "qhelp.attach.v1.m1abc123.0-example",
+      "identifier": "qhelp.attach.v1.m1abc123.0",
       "filename": "wallet.png",
       "mimeType": "image/png",
       "size": 48231,
@@ -44,6 +44,12 @@ const canPublish = actions.includes('PUBLISH_QDN_RESOURCE');
 const canPublishAttachments =
   actions.includes('PUBLISH_MULTIPLE_QDN_RESOURCES');
 const canDelete = actions.includes('DELETE_QDN_RESOURCE');
+const canManageReplyNotifications = [
+  'NOTIFICATION_HAS_PERMISSION',
+  'NOTIFICATION_ADD',
+  'NOTIFICATION_GET',
+  'NOTIFICATION_REMOVE',
+].every((action) => actions.includes(action));
 
 const hostInfo = actions.includes('GET_HOST_INFO')
   ? await window.qdnRequest({ action: 'GET_HOST_INFO' })
@@ -52,6 +58,34 @@ const hostInfo = actions.includes('GET_HOST_INFO')
 const usingPublicNode = actions.includes('IS_USING_PUBLIC_NODE')
   ? await window.qdnRequest({ action: 'IS_USING_PUBLIC_NODE' })
   : null;`,
+  notifications: `const postId = 'm1abc123';
+
+await window.qdnRequest({
+  action: 'NOTIFICATION_ADD',
+  subscriptions: [{
+    notificationId: 'help.reply.<16-hex-sha256-prefix>',
+    event: 'RESOURCE_PUBLISHED',
+    filters: {
+      service: 'JSON',
+      identifier: 'qhelp.feedback.v1.c.',
+      title: \`Reply \${postId}\`,
+      excludeBlocked: true,
+      after: Date.now(),
+    },
+    title: 'Reply activity in Help',
+    text: 'Open Help to read the reply.',
+    link: \`qdn://APP/Help/Help?post=\${postId}\`,
+  }],
+});
+
+const followed = await window.qdnRequest({
+  action: 'NOTIFICATION_GET',
+});
+
+await window.qdnRequest({
+  action: 'NOTIFICATION_REMOVE',
+  notificationIds: ['help.reply.<16-hex-sha256-prefix>'],
+});`,
   publish: `const payload = {
   schema: 'qortium.help.feedback.v1',
   kind: 'post',
@@ -394,20 +428,38 @@ export default function Reference() {
               </li>
               <li>
                 <code>PUBLISH_MULTIPLE_QDN_RESOURCES</code> publishes the attachment resources as a batch. Inspect
-                every failure before separately publishing the referencing feedback JSON with
-                <code> PUBLISH_QDN_RESOURCE</code>.
+                every failure and wait for every returned resource/signature target to reach <code>READY</code> before
+                separately publishing the referencing feedback JSON with <code> PUBLISH_QDN_RESOURCE</code>.
               </li>
               <li>Home owns account selection, signing, approval prompts, and node routing.</li>
             </ul>
           </ReferenceCard>
+          <ReferenceCard title="Reply notifications">
+            <ul>
+              <li>
+                Feature-detect all four durable notification actions before showing follow controls.
+              </li>
+              <li>
+                One <code>RESOURCE_PUBLISHED</code> rule follows one post through reply metadata; use a stable,
+                valid notification id and preserve the original <code>after</code> checkpoint when reconciling.
+              </li>
+              <li>
+                Rules are tagged to Home&apos;s active account. Re-register existing ids after
+                <code> SELECTED_ACCOUNT_CHANGED</code> without prompting when permission is already granted.
+              </li>
+            </ul>
+          </ReferenceCard>
         </div>
+
+        <CopyableCode label="Follow and unfollow replies" snippet="notifications" />
 
         <aside className="reference-callout">
           <strong>Attachment publishing is staged, not atomic.</strong>
           <p>
-            Publish all attachments first and stop if the batch reports any failure. Only then publish the feedback
-            JSON that references them. If the final JSON publish fails, the attachments can remain as unreferenced
-            public resources and the author may retry the feedback publish.
+            Publish all attachments first, stop if the batch reports any failure, and wait until each exact
+            transaction signature is the <code>READY</code> version of its resource. Only then publish the feedback
+            JSON that references them. Help derives stable attachment identifiers from the draft ID and attachment
+            position, so retrying the same draft reuses those tuples instead of creating another orphan set.
           </p>
         </aside>
 

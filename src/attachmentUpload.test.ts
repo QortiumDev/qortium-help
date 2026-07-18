@@ -40,8 +40,13 @@ describe('feedback attachment helpers', () => {
   });
 
   it('prepares attachment resources separately from the feedback JSON', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
-    const payload = createPostPayload('issue', 'Broken button', 'It does not work', 'Help');
+    const payload = createPostPayload(
+      'issue',
+      'Broken button',
+      'It does not work',
+      'Help',
+      { createdAt: 123, id: 'stable-post' },
+    );
     const bundle = prepareFeedbackBundle('Alice', payload, [
       {
         dataBase64: 'aGVsbG8=',
@@ -55,6 +60,7 @@ describe('feedback attachment helpers', () => {
     expect(bundle.resources).toHaveLength(2);
     expect(bundle.resources[0]).toMatchObject({
       filename: 'evidence.txt',
+      identifier: 'qhelp.attach.v1.stable-post.0',
       name: 'Alice',
       service: 'ATTACHMENT',
     });
@@ -64,19 +70,76 @@ describe('feedback attachment helpers', () => {
     });
     expect(bundle.payload.attachments[0]).toMatchObject({
       filename: 'evidence.txt',
+      identifier: 'qhelp.attach.v1.stable-post.0',
       name: 'Alice',
       service: 'ATTACHMENT',
     });
+
+    expect(prepareFeedbackBundle('Alice', payload, [
+      {
+        dataBase64: 'aGVsbG8=',
+        filename: 'evidence.txt',
+        mimeType: 'text/plain',
+        service: 'ATTACHMENT',
+        size: 5,
+      },
+    ]).payload.attachments[0].identifier).toBe('qhelp.attach.v1.stable-post.0');
   });
 
   it('sends only attachments through the Home batch request', async () => {
+    const payload = createPostPayload(
+      'idea',
+      'Add exports',
+      'Please add JSON export',
+      'Help',
+      { createdAt: 123, id: 'stable-post' },
+    );
+    const bundle = prepareFeedbackBundle('Alice', payload, [
+      {
+        dataBase64: 'e30=',
+        filename: 'example.json',
+        mimeType: 'application/json',
+        service: 'ATTACHMENT',
+        size: 2,
+      },
+    ]);
     qdnRequestMock.mockResolvedValue({
       accepted: true,
       action: 'PUBLISH_MULTIPLE_QDN_RESOURCES',
       failures: [],
-      published: [{ identifier: 'attachment' }],
+      published: [
+        {
+          resource: {
+            identifier: bundle.attachmentResources[0].identifier,
+            name: 'Alice',
+            service: 'ATTACHMENT',
+          },
+          transactionSignature: 'attachment-signature',
+        },
+      ],
     });
-    const payload = createPostPayload('idea', 'Add exports', 'Please add JSON export', 'Help');
+
+    await expect(publishPreparedFeedbackBundle(bundle)).resolves.toMatchObject({ accepted: true });
+    expect(qdnRequestMock).toHaveBeenCalledWith({
+      action: 'PUBLISH_MULTIPLE_QDN_RESOURCES',
+      resources: bundle.attachmentResources,
+    });
+  });
+
+  it('rejects an attachment batch without confirmation targets', async () => {
+    qdnRequestMock.mockResolvedValue({
+      accepted: true,
+      action: 'PUBLISH_MULTIPLE_QDN_RESOURCES',
+      failures: [],
+      published: [],
+    });
+    const payload = createPostPayload(
+      'idea',
+      'Add exports',
+      'Please add JSON export',
+      'Help',
+      { createdAt: 123, id: 'stable-post' },
+    );
     const bundle = prepareFeedbackBundle('Alice', payload, [
       {
         dataBase64: 'e30=',
@@ -87,10 +150,8 @@ describe('feedback attachment helpers', () => {
       },
     ]);
 
-    await expect(publishPreparedFeedbackBundle(bundle)).resolves.toMatchObject({ accepted: true });
-    expect(qdnRequestMock).toHaveBeenCalledWith({
-      action: 'PUBLISH_MULTIPLE_QDN_RESOURCES',
-      resources: bundle.attachmentResources,
-    });
+    await expect(publishPreparedFeedbackBundle(bundle)).rejects.toThrow(
+      'complete confirmation targets',
+    );
   });
 });

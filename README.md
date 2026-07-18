@@ -11,19 +11,27 @@ or reopen them. Post and comment bodies recognize `qdn://`, `home://`, and
 - Feed filters for all, open, completed, issues, ideas, orphan comments, and
   apps owned by the selected account.
 - An app dropdown, server-backed text search, active/newest sorting, paged post
-  retrieval, and replies fetched only when a post opens.
+  retrieval, metadata-only reply counts in the feed, and reply bodies fetched
+  only when a post opens. Client-side filter changes keep the existing feed
+  mounted instead of flashing the initial loading state.
 - Registered-name avatars on posts and comments.
 - Per-post detail and reply threads, copyable direct links, and ownership-gated
   edit, delete, complete, and reopen controls.
+- Explicit per-thread reply notifications through Qortium Home. Followed
+  threads are stored as durable Home notification rules, rebound to the active
+  account after account changes, and manageable from the header bell.
 - Up to three public QDN attachments on new posts and replies. Help first
-  publishes and verifies the attachment batch, then publishes the referencing
-  feedback JSON; media and documents open through the matching Home viewer when
-  available.
+  publishes the attachment batch, waits for every exact resource/signature
+  target to reach `READY`, then publishes the referencing feedback JSON. Stable
+  draft and attachment identifiers make retries reuse the same resource tuples;
+  media and documents open through the matching Home viewer when available.
 - A permanently English Developer Reference documenting the public JSON schema,
   identifiers, lifecycle, QDN metadata limits, bridge behavior, and copyable
   publish/search/fetch/delete examples.
 - Explicit preparing, submitting, confirmation, and published states for QDN
   writes, with optimistic posts/replies retained while confirmation completes.
+- New posts and replies use the first publish attempt as their creation time and
+  are labeled Edited only after QDN records a later revision.
 
 Classic, Modern, and Fun all use the full app window responsively. Modern keeps
 wider gutters, while Classic and Fun remain denser.
@@ -35,12 +43,14 @@ and publish/delete actions. The plain-browser fallback can read public feedback
 resources from `http://127.0.0.1:24891`; creating, editing, deleting, completing,
 and reopening require Home and a selected account that owns a registered name.
 
-Help is at QAVS `1.4.2`: `1.4` is the minimum Qortium platform level and the
+Help is at QAVS `1.4.6`: `1.4` is the minimum Qortium platform level and the
 patch number is the app release. `vite.config.ts` reads `package.json`, injects
 the visible version, and emits `dist/qortium-app.json` with the name `Help`.
 
 The app supports Classic, Modern, and Fun QDN UI styles and follows Home theme,
-accent, language, and text-size settings.
+accent, language, and text-size settings. Its base scale matches Home, Polls,
+Minting, and Boards: 13px supporting text, 16px interface text, 21px section
+headings, and 28px page titles before Home's selected multiplier is applied.
 
 ## Development and verification
 
@@ -91,8 +101,31 @@ qdn://APP/Help/Help?app=<appName>           # filter the feed by app
 qdn://APP/Help/Help?type=<filter>            # select a feed filter
 qdn://APP/Help/Help?new                      # open a blank composer
 qdn://APP/Help/Help?new=<appName>&type=issue # prefill app and post type
+qdn://APP/Help/Help?view=developers          # open the Developer Reference
 ```
 
 `type` accepts the feed filters implemented in `src/deepLink.ts`, including
 `all`, `open`, `completed`, `issue`, `idea`, `my-apps`, and `orphan`. Composer
 prefill accepts only `issue` or `idea`.
+
+## Reply notifications
+
+Inside a compatible Qortium Home, open a feedback thread and choose
+**Follow replies**. Help registers one `RESOURCE_PUBLISHED` rule using the
+comment identifier prefix and the thread's `Reply <postId>` metadata title.
+The rule deliberately omits Home's currently broken boolean `prefix` option;
+Core's default substring matching still requires both complete marker strings.
+Following is always explicit; posting or replying never enables it
+automatically. The header bell lists followed threads and provides open and
+unfollow controls. Help supports up to Home's limit of 20 rules.
+
+Home must remain running to watch QDN. Android watches while Home is in the
+foreground, notifications are rate-limited per app, and Home suppresses a
+notification when Help is already focused. A reply edit republishes the same
+resource and can therefore produce reply activity too. Notification clicks
+open the linked thread, which Help reloads from authoritative QDN data.
+
+Help feature-detects `NOTIFICATION_HAS_PERMISSION`, `NOTIFICATION_ADD`,
+`NOTIFICATION_GET`, and `NOTIFICATION_REMOVE`. Older Home versions and
+standalone browser development keep the existing read/write experience without
+notification controls.

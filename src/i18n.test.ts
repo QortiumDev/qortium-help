@@ -14,6 +14,11 @@ const localeModules = import.meta.glob('./locales/*.ts', { eager: true }) as Rec
 const nonEnLocales = Object.entries(localeModules).filter(([path]) => !path.endsWith('/en.ts'));
 
 describe('locale catalog parity', () => {
+  it('presents the mixed Core, Home, and QDN app selector as products', () => {
+    expect(EN_STRINGS['field.app']).toBe('Product');
+    expect(EN_STRINGS['field.appPlaceholder']).toBe('Select a product (optional)');
+  });
+
   it('ships a catalog for every non-en supported language', () => {
     expect(nonEnLocales.length).toBe(22);
   });

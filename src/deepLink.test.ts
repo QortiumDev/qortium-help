@@ -20,6 +20,7 @@ describe('deep links', () => {
 
   it('reads the app filter from the query string', () => {
     expect(getInitialAppFilter('?app=Wallet&type=issue&theme=dark')).toBe('Wallet');
+    expect(getInitialAppFilter('?app=qortium-home&type=idea')).toBe('qortium-home');
     expect(getInitialAppFilter('?app=%20')).toBeNull();
     expect(getInitialAppFilter('?new=Wallet')).toBeNull();
     expect(getInitialAppFilter('')).toBeNull();
@@ -43,6 +44,8 @@ describe('deep links', () => {
   it('reads composer pre-fill params from new post links', () => {
     expect(getInitialComposerParams('?new=Wallet&type=issue&theme=dark')).toEqual({ app: 'Wallet', type: 'issue' });
     expect(getInitialComposerParams('?new=Chat&type=idea')).toEqual({ app: 'Chat', type: 'idea' });
+    expect(getInitialComposerParams('?new=qortium-core&type=issue')).toEqual({ app: 'qortium-core', type: 'issue' });
+    expect(getInitialComposerParams('?new=qortium-home&type=idea')).toEqual({ app: 'qortium-home', type: 'idea' });
     expect(getInitialComposerParams('?new&type=idea')).toEqual({ app: null, type: 'idea' });
     expect(getInitialComposerParams('?new=Wallet&type=open')).toEqual({ app: 'Wallet', type: null });
     expect(getInitialComposerParams('?app=Wallet&type=issue')).toEqual({ app: null, type: null });

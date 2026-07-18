@@ -10,7 +10,8 @@ or reopen them. Post and comment bodies recognize `qdn://`, `home://`, and
 - Top-level Feedback, My Apps, New Post, and Developers workspaces.
 - Feed filters for all, open, completed, issues, ideas, orphan comments, and
   apps owned by the selected account.
-- An app dropdown, server-backed text search, active/newest sorting, paged post
+- A product dropdown covering Core, Home, and published QDN apps; server-backed
+  text search, active/newest sorting, paged post
   retrieval, metadata-only reply counts in the feed, and reply bodies fetched
   only when a post opens. Client-side filter changes keep the existing feed
   mounted instead of flashing the initial loading state.
@@ -43,7 +44,7 @@ and publish/delete actions. The plain-browser fallback can read public feedback
 resources from `http://127.0.0.1:24891`; creating, editing, deleting, completing,
 and reopening require Home and a selected account that owns a registered name.
 
-Help is at QAVS `1.4.6`: `1.4` is the minimum Qortium platform level and the
+Help is at QAVS `1.4.7`: `1.4` is the minimum Qortium platform level and the
 patch number is the app release. `vite.config.ts` reads `package.json`, injects
 the visible version, and emits `dist/qortium-app.json` with the name `Help`.
 
@@ -97,14 +98,16 @@ Home preserves query parameters when it renders the app. Supported forms are:
 
 ```text
 qdn://APP/Help/Help?post=<postId>           # open one post
-qdn://APP/Help/Help?app=<appName>           # filter the feed by app
+qdn://APP/Help/Help?app=<productName>       # filter the feed by product
 qdn://APP/Help/Help?type=<filter>            # select a feed filter
 qdn://APP/Help/Help?new                      # open a blank composer
-qdn://APP/Help/Help?new=<appName>&type=issue # prefill app and post type
+qdn://APP/Help/Help?new=<productName>&type=issue # prefill product and post type
 qdn://APP/Help/Help?view=developers          # open the Developer Reference
 ```
 
-`type` accepts the feed filters implemented in `src/deepLink.ts`, including
+The existing `app` query key and JSON payload field remain unchanged for
+backward compatibility. `type` accepts the feed filters implemented in
+`src/deepLink.ts`, including
 `all`, `open`, `completed`, `issue`, `idea`, `my-apps`, and `orphan`. Composer
 prefill accepts only `issue` or `idea`.
 

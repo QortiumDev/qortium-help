@@ -95,6 +95,7 @@ import {
   type FeedbackResource,
 } from './qdnFeedback';
 import { waitForFeedbackResourceReady, waitForPublishedResourcesReady } from './publishStatus';
+import { canOpenProductAsQdnApp, mergeProductNames } from './products';
 import {
   canManageHelpNotifications,
   followHelpPost,
@@ -148,10 +149,6 @@ function createDraftIdentity(): FeedbackDraftIdentity {
     id: createFeedbackId(),
   };
 }
-
-// qortium-core and qortium-home aren't published QDN APP resources, so they never
-// come back from the resource search — seed them into the app dropdown explicitly.
-const EXTRA_APP_NAMES = ['qortium-core', 'qortium-home'];
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -1372,7 +1369,7 @@ export default function App() {
 
   useEffect(() => {
     void loadPublishedAppNames().then((names) => {
-      setAppNames([...new Set([...names, ...EXTRA_APP_NAMES])].sort((a, b) => a.localeCompare(b)));
+      setAppNames(mergeProductNames(names));
     });
   }, []);
 
@@ -2347,16 +2344,18 @@ export default function App() {
                           >
                             {selectedPost.payload.app}
                           </button>
-                          <IconButton
-                            label={`${t('action.openApp')}: ${selectedPost.payload.app}`}
-                            onClick={() => {
-                              void openAppLinkInHomeTab(`qdn://APP/${selectedPost.payload.app}`).catch((error) => {
-                                console.warn('Unable to open app.', error);
-                              });
-                            }}
-                          >
-                            <ExternalLink aria-hidden="true" />
-                          </IconButton>
+                          {canOpenProductAsQdnApp(selectedPost.payload.app) ? (
+                            <IconButton
+                              label={`${t('action.openApp')}: ${selectedPost.payload.app}`}
+                              onClick={() => {
+                                void openAppLinkInHomeTab(`qdn://APP/${selectedPost.payload.app}`).catch((error) => {
+                                  console.warn('Unable to open app.', error);
+                                });
+                              }}
+                            >
+                              <ExternalLink aria-hidden="true" />
+                            </IconButton>
+                          ) : null}
                         </>
                       ) : null}
                     </div>

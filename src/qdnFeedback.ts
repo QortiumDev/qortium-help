@@ -729,7 +729,7 @@ export function canOwnResource(resource: FeedbackResource, writableNames: string
 const APP_NAMES_PAGE_SIZE = 100;
 const APP_NAMES_MAX_PAGES = 50;
 
-// Collect the registered names of every published APP resource, for the app
+// Collect the registered names of every published APP resource, for the product
 // dropdown. LIST_QDN_RESOURCES maps to Core's /arbitrary/resources, which returns
 // names alphabetically (ORDER BY name COLLATE SQL_TEXT_UCC_NO_PAD); `default: true`
 // yields one row per name. We page until a short page signals the end, with two

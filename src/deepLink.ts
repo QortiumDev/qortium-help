@@ -150,8 +150,9 @@ export type ComposerParams = {
 };
 
 // Compose links use `?new` for a general post and `?new=<name>` to pre-fill the
-// app field. `?app=<name>` is intentionally reserved for the filtered list view.
-// `type` is only honoured for the two known feedback kinds.
+// product selector. The legacy `?app=<name>` key remains reserved for the
+// filtered list view so existing links stay compatible. `type` is only honoured
+// for the two known feedback kinds.
 export function getInitialComposerParams(search?: string): ComposerParams {
   const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
   const query = new URLSearchParams(raw);

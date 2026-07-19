@@ -52,12 +52,12 @@ import { createTranslator } from './i18n';
 import { copyTextToClipboard } from './clipboard';
 import {
   buildPostLink,
-  getInitialAppFilter,
-  getInitialComposerParams,
-  getInitialDeveloperReferenceRequested,
-  getInitialFeedFilter,
-  getInitialNewPostRequested,
-  getInitialPostId,
+  readHelpRoute,
+  resolveHelpRouteViewState,
+  routeUrl,
+  shouldReplaceHistory,
+  type HelpNavigationIntent,
+  type HelpRoute,
   type InitialFeedFilter,
 } from './deepLink';
 import { applyDisplaySettings, getDisplaySettingsUpdateFromMessage, getInitialDisplaySettings } from './displaySettings';
@@ -836,6 +836,7 @@ function ReplyComposer({
 }
 
 export default function App() {
+  const [initialRoute] = useState(readHelpRoute);
   const [displaySettings, setDisplaySettings] = useState(getInitialDisplaySettings);
   const [bridgeState, setBridgeState] = useState<BridgeState>(emptyBridgeState);
   const [accountContext, setAccountContext] = useState<AccountContext>({ account: null, writableNames: [] });
@@ -845,20 +846,18 @@ export default function App() {
   const [commentCounts, setCommentCounts] = useState<FeedbackCommentCounts>({});
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FeedFilter>(() =>
-    getInitialPostId() || getInitialNewPostRequested() ? 'all' : getInitialFeedFilter() ?? 'all',
+  const [filter, setFilter] = useState<FeedFilter>(
+    initialRoute.kind === 'list' ? initialRoute.filter : 'all',
   );
-  const [selectedAppFilter, setSelectedAppFilter] = useState<AppFilterValue>(() =>
-    getInitialPostId() || getInitialNewPostRequested() ? APP_FILTER_ALL : getInitialAppFilter() ?? APP_FILTER_ALL,
+  const [selectedAppFilter, setSelectedAppFilter] = useState<AppFilterValue>(
+    initialRoute.kind === 'list' ? initialRoute.appFilter ?? APP_FILTER_ALL : APP_FILTER_ALL,
   );
-  const [view, setView] = useState<MainView>(() =>
-    getInitialDeveloperReferenceRequested()
+  const [view, setView] = useState<MainView>(
+    initialRoute.kind === 'reference'
       ? 'reference'
-      : getInitialPostId()
-        ? 'list'
-        : getInitialNewPostRequested()
-          ? 'compose'
-          : 'list',
+      : initialRoute.kind === 'compose'
+        ? 'compose'
+        : 'list',
   );
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [publishName, setPublishName] = useState('');
@@ -870,8 +869,14 @@ export default function App() {
   const [postEditApp, setPostEditApp] = useState('');
   const [commentEditId, setCommentEditId] = useState<string | null>(null);
   const [commentEditBody, setCommentEditBody] = useState('');
-  const [pendingPostId, setPendingPostId] = useState<string | null>(() => getInitialPostId());
-  const [composer] = useState(getInitialComposerParams);
+  const [pendingPostId, setPendingPostId] = useState<string | null>(
+    initialRoute.kind === 'post' ? initialRoute.postId : null,
+  );
+  const [composer, setComposer] = useState(
+    initialRoute.kind === 'compose'
+      ? { app: initialRoute.app, type: initialRoute.type }
+      : { app: null, type: null },
+  );
   const [appNames, setAppNames] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
   const [copyFallback, setCopyFallback] = useState<string | null>(null);
@@ -900,6 +905,10 @@ export default function App() {
   const notificationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const notificationOperationCountRef = useRef(0);
   const notificationGenerationRef = useRef(0);
+  const dataRef = useRef(data);
+  const postRouteSequenceRef = useRef(0);
+
+  dataRef.current = data;
 
   const t = useMemo(() => createTranslator(displaySettings.language), [displaySettings.language]);
   const accountLocked = accountContext.account?.isUnlocked === false;
@@ -919,18 +928,6 @@ export default function App() {
   useLayoutEffect(() => {
     applyDisplaySettings(displaySettings);
   }, [displaySettings]);
-
-  useEffect(() => {
-    const url = new URL(window.location.href);
-
-    if (view === 'reference') {
-      url.searchParams.set('view', 'developers');
-    } else {
-      url.searchParams.delete('view');
-    }
-
-    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [view]);
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
@@ -961,6 +958,16 @@ export default function App() {
     window.addEventListener('message', handleMessage);
 
     return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  useEffect(() => {
+    function handlePopState() {
+      applyHelpRoute(readHelpRoute());
+    }
+
+    window.addEventListener('popstate', handlePopState);
+
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   useEffect(
@@ -1341,11 +1348,16 @@ export default function App() {
     }
 
     const requestedPostId = pendingPostId;
+    const routeSequence = postRouteSequenceRef.current;
     const loadedPost = data.posts.find((post) => post.payload.id === requestedPostId);
 
     setPendingPostId(null);
 
     if (loadedPost) {
+      if (routeSequence !== postRouteSequenceRef.current) {
+        return;
+      }
+
       setSelectedPostId(requestedPostId);
       setView('detail');
       return;
@@ -1353,7 +1365,12 @@ export default function App() {
 
     void loadFeedbackPostById(requestedPostId)
       .then((post) => {
+        if (routeSequence !== postRouteSequenceRef.current) {
+          return;
+        }
+
         if (!post) {
+          navigateHelp(getListRoute(), 'invalid-target');
           return;
         }
 
@@ -1364,7 +1381,11 @@ export default function App() {
         setSelectedPostId(post.payload.id);
         setView('detail');
       })
-      .catch((error) => setLoadError(getErrorMessage(error, t('error.load'))));
+      .catch((error) => {
+        if (routeSequence === postRouteSequenceRef.current) {
+          setLoadError(getErrorMessage(error, t('error.load')));
+        }
+      });
   }, [pendingPostId, loadState, data.posts]);
 
   useEffect(() => {
@@ -1378,7 +1399,7 @@ export default function App() {
   // so the view doesn't get stranded on a now-hidden tab.
   useEffect(() => {
     if (accountLoaded && filter === 'myApps' && accountContext.writableNames.length === 0) {
-      setFilter('all');
+      navigateHelp(getListRoute('all'), 'invalid-target');
     }
   }, [accountLoaded, filter, accountContext.writableNames]);
 
@@ -1538,28 +1559,65 @@ export default function App() {
     return appNames.find((name) => name.toLowerCase() === trimmed.toLowerCase()) ?? trimmed;
   }
 
+  function getListRoute(
+    nextFilter: FeedFilter = filter,
+    nextAppFilter: AppFilterValue = selectedAppFilter,
+  ): HelpRoute {
+    return {
+      appFilter: nextAppFilter || null,
+      filter: nextFilter,
+      kind: 'list',
+    };
+  }
+
+  function applyHelpRoute(route: HelpRoute) {
+    postRouteSequenceRef.current += 1;
+    const isPostLoaded = route.kind === 'post' && dataRef.current.posts.some(
+      (post) => post.payload.id === route.postId,
+    );
+    const next = resolveHelpRouteViewState(route, isPostLoaded);
+
+    if (next.composer) setComposer(next.composer);
+    if (next.filter) setFilter(next.filter);
+    if (next.appFilter !== undefined) setSelectedAppFilter(next.appFilter ?? APP_FILTER_ALL);
+    setPendingPostId(next.pendingPostId);
+    setSelectedPostId(next.selectedPostId);
+    setView(next.view);
+  }
+
+  function navigateHelp(
+    route: HelpRoute,
+    intent: HelpNavigationIntent = 'standard',
+  ) {
+    window.history[shouldReplaceHistory(intent) ? 'replaceState' : 'pushState'](
+      window.history.state,
+      '',
+      routeUrl(route),
+    );
+    applyHelpRoute(route);
+    window.scrollTo({ top: 0 });
+  }
+
   function openComposer() {
     setLoadError(null);
-    setView('compose');
+    navigateHelp({ app: null, kind: 'compose', type: null });
   }
 
   function openDetail(postId: string) {
-    setSelectedPostId(postId);
-    setView('detail');
+    navigateHelp({ kind: 'post', postId });
   }
 
   function backToList() {
     cancelPostEdit();
     setCommentEditId(null);
     setCommentEditBody('');
-    setView('list');
+    navigateHelp(getListRoute());
   }
 
   function selectFilter(value: FeedFilter) {
     const leavingOrphans = filter === 'orphan' && value !== 'orphan';
 
-    setFilter(value);
-    setView('list');
+    navigateHelp(getListRoute(value));
 
     if (leavingOrphans) {
       setOrphanDataLoaded(false);
@@ -1568,8 +1626,7 @@ export default function App() {
   }
 
   function selectAppFilter(value: AppFilterValue) {
-    setSelectedAppFilter(value);
-    setView('list');
+    navigateHelp(getListRoute(filter, value));
   }
 
   async function ensureSelectedAccountUnlocked() {
@@ -1697,8 +1754,7 @@ export default function App() {
       setWritePhase('confirming');
 
       if (payloadToPublish.kind === 'post' && !replacedResource) {
-        setSelectedPostId(payloadToPublish.id);
-        setView('detail');
+        navigateHelp({ kind: 'post', postId: payloadToPublish.id }, 'published-post');
       }
 
       const identifier =
@@ -1951,8 +2007,7 @@ export default function App() {
           // deletion remains successful even if Home cannot remove the rule.
           void queueNotificationOperation(() => unfollowHelpPost(resource.payload.id));
         }
-        setSelectedPostId(null);
-        setView('list');
+        navigateHelp(getListRoute(), 'deleted-post');
         setData((current) => ({
           ...current,
           posts: current.posts.filter((post) => post.identifier !== resource.identifier),
@@ -2140,7 +2195,7 @@ export default function App() {
         <button
           aria-current={activeTab === 'reference' ? 'page' : undefined}
           className={`app-tab ${activeTab === 'reference' ? 'is-active' : ''}`}
-          onClick={() => setView('reference')}
+          onClick={() => navigateHelp({ kind: 'reference' })}
           type="button"
         >
           <BookOpen aria-hidden="true" />
@@ -2263,6 +2318,7 @@ export default function App() {
               canPublish={canPublish}
               initialApp={composer.app}
               initialType={composer.type ?? undefined}
+              key={`${composer.app ?? ''}:${composer.type ?? ''}`}
               onCancel={backToList}
               onPublishNameChange={setPublishName}
               onSubmit={handleCreatePost}

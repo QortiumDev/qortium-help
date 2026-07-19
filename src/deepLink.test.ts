@@ -8,6 +8,10 @@ import {
   getInitialFeedFilter,
   getInitialNewPostRequested,
   getInitialPostId,
+  readHelpRoute,
+  resolveHelpRouteViewState,
+  routeUrl,
+  shouldReplaceHistory,
 } from './deepLink';
 
 describe('deep links', () => {
@@ -106,5 +110,93 @@ describe('deep links', () => {
     const query = link.slice(link.indexOf('?'));
 
     expect(getInitialPostId(query)).toBe('xyz-789');
+  });
+
+  it('parses one canonical route with the established precedence', () => {
+    expect(readHelpRoute('?view=reference&post=ignored&new=ignored')).toEqual({ kind: 'reference' });
+    expect(readHelpRoute('?post=post-1&new=ignored&type=idea')).toEqual({ kind: 'post', postId: 'post-1' });
+    expect(readHelpRoute('?new=Wallet&type=issue')).toEqual({
+      app: 'Wallet',
+      kind: 'compose',
+      type: 'issue',
+    });
+    expect(readHelpRoute('?app=Chat&type=done')).toEqual({
+      appFilter: 'Chat',
+      filter: 'completed',
+      kind: 'list',
+    });
+    expect(readHelpRoute('')).toEqual({ appFilter: null, filter: 'all', kind: 'list' });
+  });
+
+  it('serializes routes while replacing stale Help keys and preserving host parameters', () => {
+    const location = {
+      hash: '#host-anchor',
+      pathname: '/render/APP/Help/Help',
+      search: '?theme=dark&lang=fr&post=old&new=Wallet&type=issue&view=developers&futureHost=1',
+    };
+
+    expect(routeUrl({ kind: 'post', postId: 'post / 2' }, location)).toBe(
+      '/render/APP/Help/Help?theme=dark&lang=fr&futureHost=1&post=post+%2F+2#host-anchor',
+    );
+    expect(routeUrl({ appFilter: 'Qortium Home', filter: 'idea', kind: 'list' }, location)).toBe(
+      '/render/APP/Help/Help?theme=dark&lang=fr&futureHost=1&app=Qortium+Home&type=idea#host-anchor',
+    );
+    expect(routeUrl({ app: 'Chat', kind: 'compose', type: 'issue' }, location)).toBe(
+      '/render/APP/Help/Help?theme=dark&lang=fr&futureHost=1&new=Chat&type=issue#host-anchor',
+    );
+    expect(routeUrl({ app: null, kind: 'compose', type: null }, location)).toBe(
+      '/render/APP/Help/Help?theme=dark&lang=fr&futureHost=1&new#host-anchor',
+    );
+    expect(routeUrl({ appFilter: null, filter: 'myApps', kind: 'list' }, location)).toBe(
+      '/render/APP/Help/Help?theme=dark&lang=fr&futureHost=1&type=my-apps#host-anchor',
+    );
+    expect(routeUrl({ kind: 'reference' }, location)).toBe(
+      '/render/APP/Help/Help?theme=dark&lang=fr&futureHost=1&view=developers#host-anchor',
+    );
+  });
+
+  it('clears detail state when returning to the unfiltered list', () => {
+    expect(routeUrl(
+      { appFilter: null, filter: 'all', kind: 'list' },
+      { pathname: '/render/APP/Help/Help', search: '?post=post-a&theme=light' },
+    )).toBe('/render/APP/Help/Help?theme=light');
+  });
+
+  it('uses replacement history only for canonicalizing terminal transitions', () => {
+    expect(shouldReplaceHistory('standard')).toBe(false);
+    expect(shouldReplaceHistory('published-post')).toBe(true);
+    expect(shouldReplaceHistory('deleted-post')).toBe(true);
+    expect(shouldReplaceHistory('invalid-target')).toBe(true);
+  });
+
+  it('rehydrates visible state for Back and Forward routes without a reload', () => {
+    expect(resolveHelpRouteViewState({ kind: 'post', postId: 'post-a' }, true)).toEqual({
+      pendingPostId: null,
+      selectedPostId: 'post-a',
+      view: 'detail',
+    });
+    expect(resolveHelpRouteViewState({ kind: 'post', postId: 'post-b' }, false)).toEqual({
+      pendingPostId: 'post-b',
+      selectedPostId: null,
+      view: 'list',
+    });
+    expect(resolveHelpRouteViewState({ appFilter: 'Chat', filter: 'open', kind: 'list' })).toEqual({
+      appFilter: 'Chat',
+      filter: 'open',
+      pendingPostId: null,
+      selectedPostId: null,
+      view: 'list',
+    });
+    expect(resolveHelpRouteViewState({ app: 'Wallet', kind: 'compose', type: 'idea' })).toEqual({
+      composer: { app: 'Wallet', type: 'idea' },
+      pendingPostId: null,
+      selectedPostId: null,
+      view: 'compose',
+    });
+    expect(resolveHelpRouteViewState({ kind: 'reference' })).toEqual({
+      pendingPostId: null,
+      selectedPostId: null,
+      view: 'reference',
+    });
   });
 });

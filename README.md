@@ -17,7 +17,9 @@ or reopen them. Post and comment bodies recognize `qdn://`, `home://`, and
   mounted instead of flashing the initial loading state.
 - Registered-name avatars on posts and comments.
 - Per-post detail and reply threads, copyable direct links, and ownership-gated
-  edit, delete, complete, and reopen controls.
+  edit, delete, complete, and reopen controls. Deep-linkable workspace changes
+  update browser history so Home's visible QDN address and Back/Forward controls
+  stay aligned with the current post, composer, filter, or Developer Reference.
 - Explicit per-thread reply notifications through Qortium Home. Followed
   threads are stored as durable Home notification rules, rebound to the active
   account after account changes, and manageable from the header bell.
@@ -44,7 +46,7 @@ and publish/delete actions. The plain-browser fallback can read public feedback
 resources from `http://127.0.0.1:24891`; creating, editing, deleting, completing,
 and reopening require Home and a selected account that owns a registered name.
 
-Help is at QAVS `1.4.7`: `1.4` is the minimum Qortium platform level and the
+Help is at QAVS `1.4.8`: `1.4` is the minimum Qortium platform level and the
 patch number is the app release. `vite.config.ts` reads `package.json`, injects
 the visible version, and emits `dist/qortium-app.json` with the name `Help`.
 
@@ -110,6 +112,10 @@ backward compatibility. `type` accepts the feed filters implemented in
 `src/deepLink.ts`, including
 `all`, `open`, `completed`, `issue`, `idea`, `my-apps`, and `orphan`. Composer
 prefill accepts only `issue` or `idea`.
+
+Help updates these app-owned query keys with the browser History API as users
+navigate. Host-owned query values remain intact, and Back/Forward restores the
+matching Help workspace without reloading the app.
 
 ## Reply notifications
 

@@ -22,7 +22,33 @@ export const VIEW_QUERY_PARAM = 'view';
 
 export type InitialFeedFilter = 'all' | 'completed' | 'idea' | 'issue' | 'myApps' | 'open' | 'orphan';
 
+export type HelpRoute =
+  | { kind: 'compose'; app: string | null; type: FeedbackKind | null }
+  | { kind: 'list'; appFilter: string | null; filter: InitialFeedFilter }
+  | { kind: 'post'; postId: string }
+  | { kind: 'reference' };
+
+export type HelpNavigationIntent = 'deleted-post' | 'invalid-target' | 'published-post' | 'standard';
+
+export type HelpRouteViewState = {
+  appFilter?: string | null;
+  composer?: ComposerParams;
+  filter?: InitialFeedFilter;
+  pendingPostId: string | null;
+  selectedPostId: string | null;
+  view: 'compose' | 'detail' | 'list' | 'reference';
+};
+
+const APP_ROUTE_QUERY_PARAMS = [
+  POST_QUERY_PARAM,
+  APP_QUERY_PARAM,
+  NEW_QUERY_PARAM,
+  TYPE_QUERY_PARAM,
+  VIEW_QUERY_PARAM,
+] as const;
+
 type LocationLike = {
+  hash?: string;
   pathname?: string;
   search?: string;
 };
@@ -162,4 +188,101 @@ export function getInitialComposerParams(search?: string): ComposerParams {
   const type: FeedbackKind | null = isNewPost && (rawType === 'issue' || rawType === 'idea') ? rawType : null;
 
   return { app, type };
+}
+
+export function readHelpRoute(search?: string): HelpRoute {
+  const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
+
+  if (getInitialDeveloperReferenceRequested(raw)) {
+    return { kind: 'reference' };
+  }
+
+  const postId = getInitialPostId(raw);
+
+  if (postId) {
+    return { kind: 'post', postId };
+  }
+
+  if (getInitialNewPostRequested(raw)) {
+    return { kind: 'compose', ...getInitialComposerParams(raw) };
+  }
+
+  return {
+    appFilter: getInitialAppFilter(raw),
+    filter: getInitialFeedFilter(raw) ?? 'all',
+    kind: 'list',
+  };
+}
+
+// Rewrite only Help-owned route keys. Home's display/bridge parameters and any
+// future host-owned query values stay attached to the rendered document.
+export function routeUrl(route: HelpRoute, location?: LocationLike): string {
+  const resolved = resolveLocation(location);
+  const query = new URLSearchParams(resolved.search ?? '');
+
+  for (const parameter of APP_ROUTE_QUERY_PARAMS) {
+    query.delete(parameter);
+  }
+
+  switch (route.kind) {
+    case 'compose':
+      query.set(NEW_QUERY_PARAM, route.app?.trim() ?? '');
+      if (route.type) query.set(TYPE_QUERY_PARAM, route.type);
+      break;
+    case 'list':
+      if (route.appFilter?.trim()) query.set(APP_QUERY_PARAM, route.appFilter.trim());
+      if (route.filter !== 'all') {
+        query.set(TYPE_QUERY_PARAM, route.filter === 'myApps' ? 'my-apps' : route.filter);
+      }
+      break;
+    case 'post':
+      query.set(POST_QUERY_PARAM, route.postId);
+      break;
+    case 'reference':
+      query.set(VIEW_QUERY_PARAM, 'developers');
+      break;
+  }
+
+  const queryString = query.toString().replace(/(^|&)new=(?=&|$)/, '$1new');
+
+  return `${resolved.pathname || '/'}${queryString ? `?${queryString}` : ''}${resolved.hash ?? ''}`;
+}
+
+export function shouldReplaceHistory(intent: HelpNavigationIntent): boolean {
+  return intent !== 'standard';
+}
+
+export function resolveHelpRouteViewState(
+  route: HelpRoute,
+  isPostLoaded = false,
+): HelpRouteViewState {
+  switch (route.kind) {
+    case 'compose':
+      return {
+        composer: { app: route.app, type: route.type },
+        pendingPostId: null,
+        selectedPostId: null,
+        view: 'compose',
+      };
+    case 'list':
+      return {
+        appFilter: route.appFilter,
+        filter: route.filter,
+        pendingPostId: null,
+        selectedPostId: null,
+        view: 'list',
+      };
+    case 'post':
+      return {
+        pendingPostId: isPostLoaded ? null : route.postId,
+        selectedPostId: isPostLoaded ? route.postId : null,
+        view: isPostLoaded ? 'detail' : 'list',
+      };
+    case 'reference':
+      return {
+        pendingPostId: null,
+        selectedPostId: null,
+        view: 'reference',
+      };
+  }
 }

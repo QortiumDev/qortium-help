@@ -30,6 +30,8 @@ describe('Help developer reference', () => {
     expect(REFERENCE_SNIPPETS.search).toContain("action: 'SEARCH_QDN_RESOURCES'");
     expect(REFERENCE_SNIPPETS.fetch).toContain("action: 'FETCH_QDN_RESOURCE'");
     expect(REFERENCE_SNIPPETS.delete).toContain("action: 'DELETE_QDN_RESOURCE'");
+    expect(REFERENCE_SNIPPETS.avatar).toContain("action: 'GET_NAME_DATA'");
+    expect(REFERENCE_SNIPPETS.avatar).toContain("action: 'FETCH_ACCOUNT_AVATAR'");
   });
 
   it('keeps the publish example aligned with the Help v1 resource contract', () => {
@@ -37,5 +39,12 @@ describe('Help developer reference', () => {
     expect(REFERENCE_SNIPPETS.publish).toContain("filename: 'feedback.json'");
     expect(REFERENCE_SNIPPETS.publish).toContain('qhelp.feedback.v1.p.');
     expect(REFERENCE_SNIPPETS.publish).toContain("['qortium-help', 'feedback', 'v1', 'post', payload.type]");
+  });
+
+  it('documents the owner-address boundary for pointer-aware author avatars', () => {
+    const html = renderToStaticMarkup(<Reference />);
+
+    expect(html).toContain('Author avatars');
+    expect(html).toContain('never builds a direct thumbnail URL');
   });
 });

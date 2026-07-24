@@ -1,127 +1,224 @@
-import { qdnRequest } from './qdnRequest';
+import { createContext, createElement, useContext, useEffect, useState, type ReactNode } from 'react';
+import { hasAction, hasHomeBridge, qdnRequest } from './qdnRequest';
+import type { QdnAction } from './types';
 
-// Author avatars are rendered straight into `<img src>`, so we only ever build
-// them from an allowlisted raster image type (raster-only deliberately excludes
-// `image/svg+xml`, whose data URLs can carry script), validate the base64
-// alphabet before decoding, and wrap the decoded bytes in a Blob served via
-// `URL.createObjectURL` — the value handed to `<img src>` is an opaque `blob:`
-// URL rather than a string built from the remote payload. (Ported from
-// qortium-chat's hardened avatar path; cap-avatar-1.)
 const AVATAR_MAX_BYTES = 500 * 1024;
-const SAFE_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
-const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+const MAX_PENDING_RETRIES = 3;
+const SAFE_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/bmp', 'image/webp']);
+const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
-function decodeBase64ToBytes(base64: string) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
+type AvatarSource = 'POINTER' | 'LEGACY';
+type AccountAvatarResult =
+  | { kind: 'pending'; retryAfterSeconds: number }
+  | { bytes: Uint8Array; contentType: string; kind: 'ready' }
+  | { kind: 'unavailable' };
 
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
+const AvatarActionsContext = createContext<QdnAction[]>([]);
+const ownerCache = new Map<string, string | null>();
+const ownerInFlight = new Map<string, Promise<string | null>>();
 
-  return bytes;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function getImageMimeType(base64: string) {
-  if (base64.startsWith('iVBORw0KGgo')) {
-    return 'image/png';
-  }
-
-  if (base64.startsWith('/9j/')) {
-    return 'image/jpeg';
-  }
-
-  if (base64.startsWith('R0lGOD')) {
-    return 'image/gif';
-  }
-
-  if (base64.startsWith('UklGR')) {
-    return 'image/webp';
-  }
-
-  return 'image/png';
+function text(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function getBase64Payload(value: unknown) {
-  if (typeof value !== 'string') {
-    throw new Error('Avatar resource returned an unsupported response.');
+function isAccountAddress(value: string) {
+  return /^Q[1-9A-HJ-NP-Za-km-z]{20,80}$/.test(value);
+}
+
+function isPointerDescriptor(value: unknown) {
+  return isRecord(value) && !!text(value.service) && !!text(value.name) && typeof value.identifier === 'string';
+}
+
+function decodeBase64(value: string) {
+  if (!value || !BASE64_PATTERN.test(value)) {
+    return null;
   }
 
-  const base64 = value.trim();
+  try {
+    return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
 
-  if (!base64 || !BASE64_PATTERN.test(base64)) {
-    throw new Error('Avatar resource returned malformed image data.');
+function supportsPointerAvatars(actions: QdnAction[]) {
+  return hasHomeBridge() && hasAction(actions, 'GET_NAME_DATA') && hasAction(actions, 'FETCH_ACCOUNT_AVATAR');
+}
+
+/** Parse Home's bounded avatar response; raw URLs and malformed values fail closed. */
+export function parseAccountAvatarResponse(value: unknown, address: string): AccountAvatarResult {
+  if (!isRecord(value) || value.address !== address) {
+    return { kind: 'unavailable' };
   }
 
-  return base64;
+  const source = value.source as AvatarSource;
+
+  if ((source !== 'POINTER' && source !== 'LEGACY') || (source === 'POINTER' && !isPointerDescriptor(value.descriptor))) {
+    return { kind: 'unavailable' };
+  }
+
+  if (value.status === 'PENDING') {
+    const delay = typeof value.retryAfterSeconds === 'number' && Number.isFinite(value.retryAfterSeconds)
+      ? value.retryAfterSeconds
+      : 1;
+    return { kind: 'pending', retryAfterSeconds: Math.min(30, Math.max(1, Math.floor(delay))) };
+  }
+
+  const contentType = text(value.contentType)?.toLowerCase().split(';', 1)[0] ?? '';
+  const contentLength = value.contentLength;
+  const bytes = typeof value.body === 'string' ? decodeBase64(value.body) : null;
+
+  if (
+    value.encoding !== 'base64' ||
+    !SAFE_IMAGE_MIME_TYPES.has(contentType) ||
+    typeof contentLength !== 'number' ||
+    !Number.isSafeInteger(contentLength) ||
+    contentLength < 1 ||
+    contentLength > AVATAR_MAX_BYTES ||
+    !bytes ||
+    bytes.byteLength !== contentLength
+  ) {
+    return { kind: 'unavailable' };
+  }
+
+  return { bytes, contentType, kind: 'ready' };
+}
+
+export async function fetchAccountAvatar(address: string, actions: QdnAction[]): Promise<AccountAvatarResult> {
+  if (!supportsPointerAvatars(actions) || !isAccountAddress(address)) {
+    return { kind: 'unavailable' };
+  }
+
+  try {
+    const response = await qdnRequest<unknown>({ action: 'FETCH_ACCOUNT_AVATAR', address, maxBytes: AVATAR_MAX_BYTES });
+    return parseAccountAvatarResponse(response, address);
+  } catch {
+    return { kind: 'unavailable' };
+  }
+}
+
+/** Resolve the live name owner before requesting its account-bound avatar. */
+export function resolveNameOwner(name: string, actions: QdnAction[]) {
+  const normalizedName = name.trim();
+
+  if (!normalizedName || !supportsPointerAvatars(actions)) {
+    return Promise.resolve(null);
+  }
+
+  if (ownerCache.has(normalizedName)) {
+    return Promise.resolve(ownerCache.get(normalizedName) ?? null);
+  }
+
+  const existing = ownerInFlight.get(normalizedName);
+
+  if (existing) {
+    return existing;
+  }
+
+  const request = qdnRequest<unknown>({ action: 'GET_NAME_DATA', name: normalizedName })
+    .then((response) => (isRecord(response) && typeof response.owner === 'string' && isAccountAddress(response.owner) ? response.owner : null))
+    .catch(() => null)
+    .then((owner) => {
+      ownerCache.set(normalizedName, owner);
+      ownerInFlight.delete(normalizedName);
+      return owner;
+    });
+
+  ownerInFlight.set(normalizedName, request);
+  return request;
 }
 
 export function getAvatarFallbackCharacter(name: string | null | undefined) {
   return name && name.length > 0 ? (Array.from(name)[0] ?? '?') : '?';
 }
 
-async function fetchAvatarImage(name: string): Promise<string> {
-  const base64 = getBase64Payload(
-    await qdnRequest<unknown>({
-      action: 'FETCH_QDN_RESOURCE',
-      service: 'THUMBNAIL',
-      name,
-      identifier: 'avatar',
-      encoding: 'base64',
-      rebuild: true,
-      maxBytes: AVATAR_MAX_BYTES,
-    }),
+export function AvatarActionsProvider({ actions, children }: { actions: QdnAction[]; children: ReactNode }) {
+  return createElement(AvatarActionsContext.Provider, { value: actions }, children);
+}
+
+// Mounted controls resolve the owner and fetch exactly one avatar. List loading never fetches image bytes.
+export function Avatar({ name, size = 24 }: { name: string; size?: number }) {
+  const actions = useContext(AvatarActionsContext);
+  const [src, setSrc] = useState<string | null>(null);
+  const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    let retryTimer: number | undefined;
+    let attempts = 0;
+
+    const replace = (next: string | null) => {
+      if (!active) {
+        if (next) {
+          URL.revokeObjectURL(next);
+        }
+        return;
+      }
+
+      setSrc((current) => {
+        if (current && current !== next) {
+          URL.revokeObjectURL(current);
+        }
+        return next;
+      });
+    };
+
+    const load = async () => {
+      const address = await resolveNameOwner(name, actions);
+
+      if (!active || !address) {
+        return;
+      }
+
+      const result = await fetchAccountAvatar(address, actions);
+
+      if (!active) {
+        return;
+      }
+
+      if (result.kind === 'pending' && attempts < MAX_PENDING_RETRIES) {
+        attempts += 1;
+        retryTimer = window.setTimeout(() => void load(), result.retryAfterSeconds * 1000);
+        return;
+      }
+
+      if (result.kind === 'ready') {
+        const blobBytes = new Uint8Array(result.bytes.byteLength);
+        blobBytes.set(result.bytes);
+        objectUrl = URL.createObjectURL(new Blob([blobBytes], { type: result.contentType }));
+        replace(objectUrl);
+      } else {
+        replace(null);
+      }
+    };
+
+    setBrokenSrc(null);
+    replace(null);
+    void load();
+
+    return () => {
+      active = false;
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+      }
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [actions, name]);
+
+  const showImage = src && src !== brokenSrc;
+
+  return createElement(
+    'span',
+    { 'aria-hidden': true, className: 'avatar', style: { height: size, width: size } },
+    showImage
+      ? createElement('img', { alt: '', className: 'avatar__img', onError: () => setBrokenSrc(src), src })
+      : createElement('span', { className: 'avatar__fallback' }, getAvatarFallbackCharacter(name)),
   );
-  const mimeType = getImageMimeType(base64);
-
-  // Defence in depth: even after signature sniffing, never construct a Blob with
-  // a type outside the raster allowlist.
-  const blob = new Blob([decodeBase64ToBytes(base64)], {
-    type: SAFE_IMAGE_MIME_TYPES.has(mimeType) ? mimeType : 'image/png',
-  });
-
-  // Returns an opaque `blob:` URL held for the session (not revoked — a shared URL
-  // could still back a rendered avatar elsewhere).
-  return URL.createObjectURL(blob);
-}
-
-// Session-scoped caches keyed by registered name: `resolved` holds the final
-// blob URL (or null when the author has no avatar / the fetch failed), `inflight`
-// dedupes concurrent requests so a name shared across many feed items is fetched
-// at most once.
-const resolved = new Map<string, string | null>();
-const inflight = new Map<string, Promise<string | null>>();
-
-export function getCachedAvatar(name: string): string | null | undefined {
-  return resolved.get(name);
-}
-
-export function resolveAvatar(name: string): Promise<string | null> {
-  if (!name) {
-    return Promise.resolve(null);
-  }
-
-  if (resolved.has(name)) {
-    return Promise.resolve(resolved.get(name) ?? null);
-  }
-
-  const existing = inflight.get(name);
-
-  if (existing) {
-    return existing;
-  }
-
-  const pending = fetchAvatarImage(name)
-    .then((src) => src)
-    .catch(() => null)
-    .then((src) => {
-      resolved.set(name, src);
-      inflight.delete(name);
-
-      return src;
-    });
-
-  inflight.set(name, pending);
-
-  return pending;
 }

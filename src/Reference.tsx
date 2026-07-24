@@ -81,6 +81,69 @@ if (canFetchAuthorAvatar) {
     // descriptor before turning avatar.body into a Blob URL for one <img>.
   }
 }`,
+  avatarFeatureDetection: `const actions = await window.qdnRequest({
+  action: 'SHOW_ACTIONS',
+});
+
+const canFetchAccountAvatar = actions.includes('FETCH_ACCOUNT_AVATAR');
+const canFetchGroupAvatar = actions.includes('FETCH_GROUP_AVATAR');
+const canSetAccountAvatar = actions.includes('SET_ACCOUNT_AVATAR');
+const canSetGroupAvatar = actions.includes('SET_GROUP_AVATAR');`,
+  fetchAvatar: `const MAX_AVATAR_BYTES = 500 * 1024;
+
+async function loadVisibleAccountAvatar(address) {
+  const result = await window.qdnRequest({
+    action: 'FETCH_ACCOUNT_AVATAR',
+    address,
+    maxBytes: MAX_AVATAR_BYTES,
+  });
+
+  if (result.status === 'PENDING') {
+    window.setTimeout(() => loadVisibleAccountAvatar(address),
+      (result.retryAfterSeconds ?? 5) * 1000);
+    return null;
+  }
+
+  if (result.encoding !== 'base64' ||
+      result.contentLength > MAX_AVATAR_BYTES ||
+      !String(result.contentType).startsWith('image/')) return null;
+
+  const binary = atob(result.body);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  if (bytes.byteLength !== result.contentLength) return null;
+
+  // source is 'POINTER' or 'LEGACY'. descriptor is the pointer tuple when set.
+  const url = URL.createObjectURL(new Blob([bytes], { type: result.contentType }));
+  return { source: result.source, descriptor: result.descriptor, url };
+}
+
+// Revoke the prior URL when its image is replaced or unmounted.
+// Use FETCH_GROUP_AVATAR with { groupId } for a visible group avatar.`,
+  setAvatarPointer: `// First publish a public, single-file image resource and wait for READY.
+// Publishing does not set the avatar pointer by itself.
+const avatar = {
+  service: 'THUMBNAIL',
+  name: selectedPrimaryName,
+  identifier: 'avatar',
+};
+
+await window.qdnRequest({
+  action: 'SET_ACCOUNT_AVATAR',
+  avatar,
+});
+
+// A group setter also requires its group id:
+await window.qdnRequest({
+  action: 'SET_GROUP_AVATAR',
+  groupId,
+  avatar: {
+    service: 'THUMBNAIL',
+    name: groupOwnerPrimaryName,
+    identifier: \`qortium-group-avatar-v1-\${groupId}\`,
+  },
+});
+
+// Clear either pointer with a separate approved request: { avatar: null }.`,
   notifications: `const postId = 'm1abc123';
 
 await window.qdnRequest({
@@ -252,6 +315,7 @@ export default function Reference() {
         <a href="#lifecycle">Lifecycle</a>
         <a href="#metadata">Metadata</a>
         <a href="#bridge">Home bridge</a>
+        <a href="#avatars">Avatars</a>
         <a href="#examples">Examples</a>
       </nav>
 
@@ -513,9 +577,70 @@ export default function Reference() {
         </aside>
       </section>
 
+      <section className="reference-section" id="avatars">
+        <div className="reference-section__heading">
+          <p className="reference-kicker">06 · Account and group avatars</p>
+          <h2>Use the pointer-aware bridge, not a named thumbnail URL</h2>
+          <p>
+            Call <code>SHOW_ACTIONS</code> before showing avatar controls. Fetch images only for identities currently
+            visible in the interface; do not turn a batch identity lookup into a batch image download.
+          </p>
+        </div>
+
+        <CopyableCode label="Avatar capability detection" snippet="avatarFeatureDetection" />
+
+        <div className="reference-grid">
+          <ReferenceCard title="Safe reads">
+            <p>
+              <code>FETCH_ACCOUNT_AVATAR</code> accepts an <code>address</code> (or the selected account), and
+              <code> FETCH_GROUP_AVATAR</code> accepts a positive <code>groupId</code> or <code>txGroupId</code>.
+              These reads are public-node safe.
+            </p>
+            <p>
+              A ready result carries base64 <code>body</code>, <code>contentType</code>, <code>contentLength</code>,
+              <code>source</code>, and an optional <code>{'{ service, name, identifier }'}</code> descriptor. Build an
+              in-memory Blob URL only; never rebuild a raw node/QDN URL from the response.
+            </p>
+          </ReferenceCard>
+          <ReferenceCard title="Pending and fallback">
+            <p>
+              A <code>status: 'PENDING'</code> result is retryable after <code>retryAfterSeconds</code>. Keep initials
+              visible while it is queued. Missing, malformed, or unsupported results fall back to initials without a
+              retry loop.
+            </p>
+            <p>
+              An explicit pointer wins and resolves to its latest resource revision. Invalid pointer content fails
+              closed. A <code>source: 'LEGACY'</code> result is compatibility data, not an on-chain pointer; do not use
+              <code> avatarSrc</code> or <code>avatarUrl</code> as an authoritative image source.
+            </p>
+          </ReferenceCard>
+          <ReferenceCard title="Authoring">
+            <p>
+              Publish the public single-file image first, wait for that resource to become <code>READY</code>, then
+              call the matching setter. The publish and pointer assignment are separate, single-request approvals.
+            </p>
+            <p>
+              Both setters accept <code>{'{ service, name, identifier }'}</code> or <code>avatar: null</code> to clear.
+              Account assignment targets the selected account; group assignment also includes <code>groupId</code>.
+            </p>
+          </ReferenceCard>
+        </div>
+
+        <CopyableCode label="Fetch one visible account avatar" snippet="fetchAvatar" />
+        <CopyableCode label="Set or clear an avatar pointer" snippet="setAvatarPointer" />
+
+        <aside className="reference-callout">
+          <strong>Bounded, mutable image data.</strong>
+          <p>
+            Home validates raster image bytes and caps avatar responses at 500 KiB. A pointer is intentionally mutable,
+            so cache it briefly and revalidate rather than treating a descriptor as an immutable signature.
+          </p>
+        </aside>
+      </section>
+
       <section className="reference-section" id="examples">
         <div className="reference-section__heading">
-          <p className="reference-kicker">06 · Copyable examples</p>
+          <p className="reference-kicker">07 · Copyable examples</p>
           <h2>Publish, discover, fetch, and delete</h2>
           <p>
             These examples use the Qortium Home bridge. Substitute real selected-account names and generated short

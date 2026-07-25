@@ -25,6 +25,16 @@ export type PreparedFeedbackAttachment = {
   size: number;
 };
 
+type TransferFileItem = {
+  getAsFile(): File | null;
+  kind: string;
+};
+
+type TransferFileSource = {
+  files?: ArrayLike<File> | null;
+  items?: ArrayLike<TransferFileItem> | null;
+};
+
 export type PublishedQdnResource = {
   resource: {
     identifier: string | null;
@@ -40,6 +50,37 @@ export type PublishMultipleResult = {
   failures?: unknown[];
   published?: PublishedQdnResource[];
 };
+
+/**
+ * Clipboard implementations vary: a copied screenshot can appear in the
+ * direct FileList, as a file-kind item, or both. Prefer the FileList so the
+ * browser does not hand the same file to the caller twice; fall back to items
+ * for screenshot tools that expose no FileList. Text and HTML are excluded so
+ * ordinary text paste stays with the textarea.
+ */
+export function getTransferFiles(source: TransferFileSource | null | undefined): File[] {
+  const directFiles = Array.from(source?.files ?? []);
+
+  if (directFiles.length > 0) {
+    return directFiles;
+  }
+
+  const files: File[] = [];
+
+  for (const item of Array.from(source?.items ?? [])) {
+    if (item.kind !== 'file') {
+      continue;
+    }
+
+    const file = item.getAsFile();
+
+    if (file) {
+      files.push(file);
+    }
+  }
+
+  return files;
+}
 
 export function getAttachmentService(file: Pick<File, 'type'>): AttachmentService {
   const type = file.type.toLowerCase();

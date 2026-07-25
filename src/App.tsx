@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
@@ -34,6 +34,7 @@ import helpIconUrl from './assets/qortium-help-protoicon-black-transparent.png';
 import { AttachmentList } from './attachments';
 import {
   formatAttachmentSize,
+  getTransferFiles,
   MAX_ATTACHMENT_COUNT,
   prepareFeedbackAttachment,
   prepareFeedbackBundle,
@@ -368,22 +369,24 @@ function AttachmentPicker({
   disabled,
   files,
   onChange,
+  pasteTargetRef,
 }: {
   disabled: boolean;
   files: PreparedFeedbackAttachment[];
   onChange: (files: PreparedFeedbackAttachment[]) => void;
+  pasteTargetRef?: RefObject<HTMLTextAreaElement | null>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
 
-  async function addFiles(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0 || disabled || processing) {
+  async function addFiles(input: readonly File[]) {
+    if (input.length === 0 || disabled || processing) {
       return;
     }
 
     const available = Math.max(0, MAX_ATTACHMENT_COUNT - files.length);
-    const selected = Array.from(fileList).slice(0, available);
+    const selected = input.slice(0, available);
 
     if (selected.length === 0) {
       setError(`A maximum of ${MAX_ATTACHMENT_COUNT} attachments is supported.`);
@@ -408,6 +411,29 @@ function AttachmentPicker({
     }
   }
 
+  useEffect(() => {
+    const target = pasteTargetRef?.current;
+
+    if (!target) {
+      return;
+    }
+
+    function handlePaste(event: ClipboardEvent) {
+      const pastedFiles = getTransferFiles(event.clipboardData);
+
+      if (pastedFiles.length === 0 || disabled || processing || files.length >= MAX_ATTACHMENT_COUNT) {
+        return;
+      }
+
+      event.preventDefault();
+      void addFiles(pastedFiles);
+    }
+
+    target.addEventListener('paste', handlePaste);
+
+    return () => target.removeEventListener('paste', handlePaste);
+  }, [disabled, files.length, pasteTargetRef, processing]);
+
   return (
     <div className="attachment-picker">
       <input
@@ -416,7 +442,7 @@ function AttachmentPicker({
         disabled={disabled || processing || files.length >= MAX_ATTACHMENT_COUNT}
         multiple
         onChange={(event) => {
-          void addFiles(event.target.files);
+          void addFiles(Array.from(event.target.files ?? []));
         }}
         ref={inputRef}
         type="file"
@@ -504,6 +530,7 @@ function PostComposer({
   const [body, setBody] = useState('');
   const [attachments, setAttachments] = useState<PreparedFeedbackAttachment[]>([]);
   const [draftIdentity, setDraftIdentity] = useState<FeedbackDraftIdentity | null>(null);
+  const bodyInputRef = useRef<HTMLTextAreaElement>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -613,6 +640,7 @@ function PostComposer({
           disabled={!canPublish || publishing}
           maxLength={12000}
           onChange={(event) => setBody(event.target.value)}
+          ref={bodyInputRef}
           rows={8}
           value={body}
         />
@@ -621,6 +649,7 @@ function PostComposer({
         disabled={!canAttach || publishing}
         files={attachments}
         onChange={setAttachments}
+        pasteTargetRef={bodyInputRef}
       />
       <div className="composer__footer">
         <span className="publish-name">{publishName || t('status.noName')}</span>
@@ -781,6 +810,7 @@ function ReplyComposer({
   const [body, setBody] = useState('');
   const [attachments, setAttachments] = useState<PreparedFeedbackAttachment[]>([]);
   const [draftIdentity, setDraftIdentity] = useState<FeedbackDraftIdentity | null>(null);
+  const bodyInputRef = useRef<HTMLTextAreaElement>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -812,6 +842,7 @@ function ReplyComposer({
           disabled={!canPublish || publishing}
           maxLength={12000}
           onChange={(event) => setBody(event.target.value)}
+          ref={bodyInputRef}
           rows={3}
           value={body}
         />
@@ -820,6 +851,7 @@ function ReplyComposer({
         disabled={!canAttach || publishing}
         files={attachments}
         onChange={setAttachments}
+        pasteTargetRef={bodyInputRef}
       />
       <div className="button-row">
         <CommandButton

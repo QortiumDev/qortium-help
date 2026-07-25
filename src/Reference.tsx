@@ -58,6 +58,29 @@ const hostInfo = actions.includes('GET_HOST_INFO')
 const usingPublicNode = actions.includes('IS_USING_PUBLIC_NODE')
   ? await window.qdnRequest({ action: 'IS_USING_PUBLIC_NODE' })
   : null;`,
+  avatar: `const canFetchAuthorAvatar = [
+  'GET_NAME_DATA',
+  'FETCH_ACCOUNT_AVATAR',
+].every((action) => actions.includes(action));
+
+if (canFetchAuthorAvatar) {
+  // Resolve the current owner of the feedback resource's registered name.
+  const nameData = await window.qdnRequest({
+    action: 'GET_NAME_DATA',
+    name: resource.name,
+  });
+
+  if (typeof nameData?.owner === 'string') {
+    const avatar = await window.qdnRequest({
+      action: 'FETCH_ACCOUNT_AVATAR',
+      address: nameData.owner,
+      maxBytes: 500 * 1024,
+    });
+
+    // Validate address, base64, byte length, raster MIME type, and pointer
+    // descriptor before turning avatar.body into a Blob URL for one <img>.
+  }
+}`,
   notifications: `const postId = 'm1abc123';
 
 await window.qdnRequest({
@@ -449,9 +472,26 @@ export default function Reference() {
               </li>
             </ul>
           </ReferenceCard>
+          <ReferenceCard title="Author avatars">
+            <ul>
+              <li>
+                Resolve the feedback resource&apos;s registered name with <code>GET_NAME_DATA</code> before requesting
+                its current owner&apos;s account avatar.
+              </li>
+              <li>
+                Feature-detect both <code>GET_NAME_DATA</code> and <code>FETCH_ACCOUNT_AVATAR</code>; browser mode
+                keeps the initial fallback and never builds a direct thumbnail URL.
+              </li>
+              <li>
+                Fetch avatar bytes only for mounted controls. Validate Home&apos;s bounded base64 response, construct a
+                Blob URL, and revoke it when the control is replaced or unmounted.
+              </li>
+            </ul>
+          </ReferenceCard>
         </div>
 
         <CopyableCode label="Follow and unfollow replies" snippet="notifications" />
+        <CopyableCode label="Resolve and fetch a visible author avatar" snippet="avatar" />
 
         <aside className="reference-callout">
           <strong>Attachment publishing is staged, not atomic.</strong>

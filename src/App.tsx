@@ -40,7 +40,7 @@ import {
   publishPreparedFeedbackBundle,
   type PreparedFeedbackAttachment,
 } from './attachmentUpload';
-import { Avatar } from './Avatar';
+import { Avatar, AvatarActionsProvider } from './avatar';
 import {
   APP_FILTER_ALL,
   buildAppFilterOptions,
@@ -2067,6 +2067,7 @@ export default function App() {
   const showSidebar = view !== 'compose' && view !== 'reference';
 
   return (
+    <AvatarActionsProvider actions={bridgeState.actions}>
     <main className="app-shell">
       <header className="topbar">
         <div className="brand">
@@ -2709,5 +2710,6 @@ export default function App() {
         />
       ) : null}
     </main>
+    </AvatarActionsProvider>
   );
 }

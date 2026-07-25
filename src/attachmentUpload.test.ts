@@ -13,6 +13,7 @@ import {
   formatAttachmentSize,
   getAttachmentMaxBytes,
   getAttachmentService,
+  getTransferFiles,
   MAX_ATTACHMENT_BYTES,
   MAX_IMAGE_BYTES,
   prepareFeedbackBundle,
@@ -25,6 +26,33 @@ afterEach(() => {
 });
 
 describe('feedback attachment helpers', () => {
+  it('uses direct clipboard files first and supports item-only screenshots', () => {
+    const direct = { name: 'direct.png' } as File;
+    const screenshot = { name: 'clipboard.png' } as File;
+
+    expect(
+      getTransferFiles({
+        files: { 0: direct, length: 1 },
+        items: { 0: { getAsFile: () => screenshot, kind: 'file' }, length: 1 },
+      }),
+    ).toEqual([direct]);
+    expect(
+      getTransferFiles({
+        files: { length: 0 },
+        items: { 0: { getAsFile: () => screenshot, kind: 'file' }, length: 1 },
+      }),
+    ).toEqual([screenshot]);
+  });
+
+  it('leaves text-only clipboard data to the textarea', () => {
+    expect(
+      getTransferFiles({
+        files: { length: 0 },
+        items: { 0: { getAsFile: () => null, kind: 'string' }, length: 1 },
+      }),
+    ).toEqual([]);
+  });
+
   it('routes safe raster images and media to matching QDN services', () => {
     expect(getAttachmentService({ type: 'image/png' } as File)).toBe('IMAGE');
     expect(getAttachmentService({ type: 'image/svg+xml' } as File)).toBe('ATTACHMENT');

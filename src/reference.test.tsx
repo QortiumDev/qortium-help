@@ -47,4 +47,25 @@ describe('Help developer reference', () => {
     expect(html).toContain('Author avatars');
     expect(html).toContain('never builds a direct thumbnail URL');
   });
+
+  it('documents the pointer-aware avatar contract and safe fallback behaviour', () => {
+    const html = renderToStaticMarkup(<Reference />);
+
+    expect(html).toContain('Account and group avatars');
+    expect(html).toContain("status: &#x27;PENDING&#x27;");
+    expect(html).toContain('500 KiB');
+    expect(html).toContain('latest resource revision');
+    expect(html).toContain('avatar: null');
+  });
+
+  it('provides copyable feature detection, read, and setter examples for avatars', () => {
+    expect(REFERENCE_SNIPPETS.avatarFeatureDetection).toContain("'FETCH_ACCOUNT_AVATAR'");
+    expect(REFERENCE_SNIPPETS.avatarFeatureDetection).toContain("'SET_GROUP_AVATAR'");
+    expect(REFERENCE_SNIPPETS.fetchAvatar).toContain("status === 'PENDING'");
+    expect(REFERENCE_SNIPPETS.fetchAvatar).toContain('retryAfterSeconds');
+    expect(REFERENCE_SNIPPETS.fetchAvatar).toContain("source is 'POINTER' or 'LEGACY'");
+    expect(REFERENCE_SNIPPETS.fetchAvatar).toContain('URL.createObjectURL(new Blob');
+    expect(REFERENCE_SNIPPETS.setAvatarPointer).toContain("action: 'SET_ACCOUNT_AVATAR'");
+    expect(REFERENCE_SNIPPETS.setAvatarPointer).toContain('avatar: null');
+  });
 });

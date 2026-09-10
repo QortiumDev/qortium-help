@@ -57,3 +57,18 @@ describe('copyTextToClipboard', () => {
     expect(fallbackDocument.execCommand).toHaveBeenCalledWith('copy');
   });
 });
+
+
+it('restores keyboard focus after a sandbox fallback fails', async () => {
+  const doc = mockDocument(false);
+  const focus = vi.fn();
+  Object.assign(doc, { activeElement: { focus } });
+  vi.stubGlobal('navigator', {});
+  vi.stubGlobal('document', doc);
+  expect(await copyTextToClipboard('example')).toBe(false);
+  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+});
+
+it('reports unavailable with no clipboard or document support', async () => {
+  expect(await copyTextToClipboard('example', {})).toBe(false);
+});

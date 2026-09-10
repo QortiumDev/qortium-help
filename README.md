@@ -138,3 +138,19 @@ Help feature-detects `NOTIFICATION_HAS_PERMISSION`, `NOTIFICATION_ADD`,
 `NOTIFICATION_GET`, and `NOTIFICATION_REMOVE`. Older Home versions and
 standalone browser development keep the existing read/write experience without
 notification controls.
+
+
+### Developers maintenance (1.4.10)
+
+The always-English Developers reference imports the feedback schema, resource tuple,
+paging and metadata limits from the publishing/reading implementation. Its executable
+publish example preserves the UTF-8 byte limits, including non-ASCII titles and bodies.
+Copy controls announce success or clipboard unavailability and preserve keyboard focus.
+Section links retain Home query parameters and use the Help panel for scrolling;
+`view=developer` and `view=reference` normalize to `view=developers`. Clay now follows
+Home appearance settings in every workspace.
+
+Reply notifications remain conditional on all four producer actions advertised by
+`SHOW_ACTIONS`. Hosts without the complete producer contract leave follow controls
+unavailable; notification manager actions do not enable it. This maintenance does not change follow behavior
+or implement the pending Home producer API.

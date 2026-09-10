@@ -1,10 +1,13 @@
 import { Check, Copy } from 'lucide-react';
 import { useState } from 'react';
 import { copyTextToClipboard } from './clipboard';
+import { ReferenceNavigation } from './ReferenceNavigation';
+import { FEEDBACK_SCHEMA, FEEDBACK_POST_PREFIX, FEEDBACK_COMMENT_PREFIX, FEEDBACK_SERVICE, FEEDBACK_FILE_NAME, FEEDBACK_TAGS, MAX_FEEDBACK_RESOURCE_BYTES, FEEDBACK_POST_PAGE_SIZE, FEEDBACK_COMMENT_PAGE_SIZE, FEEDBACK_METADATA_TITLE_BYTES, FEEDBACK_METADATA_DESCRIPTION_BYTES, FEEDBACK_METADATA_TAG_LIMIT } from './qdnFeedback';
+import { HELP_NOTIFICATION_ACTIONS, HELP_NOTIFICATION_RULE_LIMIT } from './notifications';
 
 export const REFERENCE_SNIPPETS = {
   postSchema: `{
-  "schema": "qortium.help.feedback.v1",
+  "schema": "${FEEDBACK_SCHEMA}",
   "kind": "post",
   "id": "m1abc123",
   "type": "issue",
@@ -27,7 +30,7 @@ export const REFERENCE_SNIPPETS = {
   "updatedAt": 1784203200000
 }`,
   commentSchema: `{
-  "schema": "qortium.help.feedback.v1",
+  "schema": "${FEEDBACK_SCHEMA}",
   "kind": "comment",
   "id": "m1reply9",
   "postId": "m1abc123",
@@ -44,12 +47,7 @@ const canPublish = actions.includes('PUBLISH_QDN_RESOURCE');
 const canPublishAttachments =
   actions.includes('PUBLISH_MULTIPLE_QDN_RESOURCES');
 const canDelete = actions.includes('DELETE_QDN_RESOURCE');
-const canManageReplyNotifications = [
-  'NOTIFICATION_HAS_PERMISSION',
-  'NOTIFICATION_ADD',
-  'NOTIFICATION_GET',
-  'NOTIFICATION_REMOVE',
-].every((action) => actions.includes(action));
+const canManageReplyNotifications = ${JSON.stringify(HELP_NOTIFICATION_ACTIONS, null, 2)}.every((action) => actions.includes(action));
 
 const hostInfo = actions.includes('GET_HOST_INFO')
   ? await window.qdnRequest({ action: 'GET_HOST_INFO' })
@@ -144,7 +142,9 @@ await window.qdnRequest({
 });
 
 // Clear either pointer with a separate approved request: { avatar: null }.`,
-  notifications: `const postId = 'm1abc123';
+  notifications: `// Run only when all four producer actions above are advertised and permission is granted.
+// If any producer action is missing, leave follow controls unavailable.
+const postId = 'm1abc123';
 
 await window.qdnRequest({
   action: 'NOTIFICATION_ADD',
@@ -152,8 +152,8 @@ await window.qdnRequest({
     notificationId: 'help.reply.<16-hex-sha256-prefix>',
     event: 'RESOURCE_PUBLISHED',
     filters: {
-      service: 'JSON',
-      identifier: 'qhelp.feedback.v1.c.',
+      service: '${FEEDBACK_SERVICE}',
+      identifier: '${FEEDBACK_COMMENT_PREFIX}',
       title: \`Reply \${postId}\`,
       excludeBlocked: true,
       after: Date.now(),
@@ -173,7 +173,7 @@ await window.qdnRequest({
   notificationIds: ['help.reply.<16-hex-sha256-prefix>'],
 });`,
   publish: `const payload = {
-  schema: 'qortium.help.feedback.v1',
+  schema: '${FEEDBACK_SCHEMA}',
   kind: 'post',
   id: 'm1abc123',
   type: 'issue',
@@ -186,6 +186,16 @@ await window.qdnRequest({
   updatedAt: Date.now(),
 };
 
+// Metadata limits count UTF-8 bytes, not JavaScript characters.
+function truncateUtf8(value, maxBytes) {
+  let result = '';
+  for (const character of value) {
+    if (new TextEncoder().encode(result + character).length > maxBytes) break;
+    result += character;
+  }
+  return result;
+}
+
 const json = JSON.stringify(payload, null, 2);
 const bytes = new TextEncoder().encode(json);
 let binary = '';
@@ -193,47 +203,47 @@ for (const byte of bytes) binary += String.fromCharCode(byte);
 
 await window.qdnRequest({
   action: 'PUBLISH_QDN_RESOURCE',
-  service: 'JSON',
+  service: '${FEEDBACK_SERVICE}',
   name: 'ReporterName',
-  identifier: \`qhelp.feedback.v1.p.\${payload.id}\`,
-  filename: 'feedback.json',
-  title: payload.title.slice(0, 80),
-  description: payload.body.slice(0, 240),
-  tags: ['qortium-help', 'feedback', 'v1', 'post', payload.type],
+  identifier: \`${FEEDBACK_POST_PREFIX}\${payload.id}\`,
+  filename: '${FEEDBACK_FILE_NAME}',
+  title: truncateUtf8(payload.title, ${FEEDBACK_METADATA_TITLE_BYTES}),
+  description: truncateUtf8(payload.body, ${FEEDBACK_METADATA_DESCRIPTION_BYTES}),
+  tags: [...${JSON.stringify(FEEDBACK_TAGS)}, 'post', payload.type].slice(0, ${FEEDBACK_METADATA_TAG_LIMIT}),
   base64: btoa(binary),
 });`,
   search: `const resources = await window.qdnRequest({
   action: 'SEARCH_QDN_RESOURCES',
-  service: 'JSON',
-  identifier: 'qhelp.feedback.v1.p.',
+  service: '${FEEDBACK_SERVICE}',
+  identifier: '${FEEDBACK_POST_PREFIX}',
   prefix: true,
   mode: 'ALL',
   reverse: true,
   includeMetadata: true,
   includeStatus: true,
-  limit: 50,
+  limit: ${FEEDBACK_POST_PAGE_SIZE},
   offset: 0,
 });
 
 // Direct Core equivalent:
 // GET /arbitrary/resources/search
-//   ?service=JSON&identifier=qhelp.feedback.v1.p.
+//   ?service=${FEEDBACK_SERVICE}&identifier=${FEEDBACK_POST_PREFIX}
 //   &prefix=true&mode=ALL&reverse=true
 //   &includemetadata=true&includestatus=true
-//   &limit=50&offset=0`,
+//   &limit=${FEEDBACK_POST_PAGE_SIZE}&offset=0`,
   fetch: `const payload = await window.qdnRequest({
   action: 'FETCH_QDN_RESOURCE',
-  service: 'JSON',
+  service: '${FEEDBACK_SERVICE}',
   name: resource.name,
   identifier: resource.identifier,
-  maxBytes: 200_000,
+  maxBytes: ${MAX_FEEDBACK_RESOURCE_BYTES},
 });
 
 // Direct Core equivalent:
-// GET /arbitrary/JSON/{name}/{identifier}`,
+// GET /arbitrary/${FEEDBACK_SERVICE}/{name}/{identifier}`,
   delete: `await window.qdnRequest({
   action: 'DELETE_QDN_RESOURCE',
-  service: 'JSON',
+  service: '${FEEDBACK_SERVICE}',
   name: resource.name,
   identifier: resource.identifier,
 });`,
@@ -248,11 +258,13 @@ function CopyableCode({
   label: string;
   snippet: ReferenceSnippetName;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [result, setResult] = useState<'idle' | 'copied' | 'unavailable'>('idle');
   const code = REFERENCE_SNIPPETS[snippet];
 
-  const copy = async () => {
-    setCopied(await copyTextToClipboard(code));
+  const copy = async (button: HTMLButtonElement) => {
+    setResult('idle');
+    setResult(await copyTextToClipboard(code) ? 'copied' : 'unavailable');
+    button.focus({ preventScroll: true });
   };
 
   return (
@@ -262,16 +274,17 @@ function CopyableCode({
         <button
           aria-label={`Copy ${label}`}
           className="reference-code__copy"
-          onClick={() => {
-            void copy();
+          onClick={(event) => {
+            void copy(event.currentTarget);
           }}
           type="button"
         >
-          {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-          <span>{copied ? 'Copied' : 'Copy'}</span>
+          {result === 'copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+          <span>{result === 'copied' ? 'Copied' : 'Copy'}</span>
         </button>
       </div>
-      <pre>
+      <p className="reference-copy-status" role="status" aria-live="polite">{result === 'copied' ? `Copied ${label}.` : result === 'unavailable' ? 'Clipboard unavailable. Select the code and copy it manually.' : 'Code can be selected for manual copying.'}</p>
+      <pre aria-label={label} tabIndex={0}>
         <code>{code}</code>
       </pre>
     </div>
@@ -295,13 +308,13 @@ function ReferenceCard({
 
 export default function Reference() {
   return (
-    <div className="developer-reference">
+    <div className="developer-reference" lang="en" dir="ltr">
       <header className="reference-hero">
         <p className="reference-eyebrow">Developer reference</p>
         <h1>Build with Qortium Help feedback</h1>
         <p>
           Help stores posts and replies as independent public JSON resources on QDN. This reference documents the
-          current <code>qortium.help.feedback.v1</code> format and the Qortium Home bridge calls used by the app.
+          current <code>{FEEDBACK_SCHEMA}</code> format and the Qortium Home bridge calls used by the app.
         </p>
         <p className="reference-note">
           This page intentionally remains in English so schema names, action names, and examples stay identical for
@@ -309,23 +322,16 @@ export default function Reference() {
         </p>
       </header>
 
-      <nav aria-label="Developer reference sections" className="reference-toc">
-        <a href="#data-model">Data model</a>
-        <a href="#identifiers">Identifiers</a>
-        <a href="#lifecycle">Lifecycle</a>
-        <a href="#metadata">Metadata</a>
-        <a href="#bridge">Home bridge</a>
-        <a href="#avatars">Avatars</a>
-        <a href="#examples">Examples</a>
-      </nav>
+      <ReferenceNavigation />
 
-      <section className="reference-section" id="data-model">
+      <section className="reference-section" id="data-model" tabIndex={-1}>
         <div className="reference-section__heading">
           <p className="reference-kicker">01 · Data model</p>
           <h2>One schema, two resource kinds</h2>
           <p>
-            Both kinds use QDN service <code>JSON</code>, filename <code>feedback.json</code>, Unix timestamps in
+            Both kinds use QDN service <code>{FEEDBACK_SERVICE}</code>, filename <code>{FEEDBACK_FILE_NAME}</code>, Unix timestamps in
             milliseconds, and the exact schema marker below. Unknown or malformed resources should be ignored.
+            Help fetches at most {MAX_FEEDBACK_RESOURCE_BYTES.toLocaleString('en-US')} bytes per feedback resource, with pages of {FEEDBACK_POST_PAGE_SIZE} posts or {FEEDBACK_COMMENT_PAGE_SIZE} comments.
           </p>
         </div>
 
@@ -363,7 +369,7 @@ export default function Reference() {
         </div>
       </section>
 
-      <section className="reference-section" id="identifiers">
+      <section className="reference-section" id="identifiers" tabIndex={-1}>
         <div className="reference-section__heading">
           <p className="reference-kicker">02 · Identifiers</p>
           <h2>Short, stable resource keys</h2>
@@ -371,11 +377,11 @@ export default function Reference() {
 
         <div className="reference-grid">
           <ReferenceCard title="Post identifier">
-            <code className="reference-identifier">qhelp.feedback.v1.p.&lt;postId&gt;</code>
+            <code className="reference-identifier">{FEEDBACK_POST_PREFIX}&lt;postId&gt;</code>
             <p>The post ID appears in both the QDN identifier and the JSON payload.</p>
           </ReferenceCard>
           <ReferenceCard title="Comment identifier">
-            <code className="reference-identifier">qhelp.feedback.v1.c.&lt;commentId&gt;</code>
+            <code className="reference-identifier">{FEEDBACK_COMMENT_PREFIX}&lt;commentId&gt;</code>
             <p>
               The parent ID is deliberately omitted. It belongs in <code>postId</code> inside the payload.
             </p>
@@ -391,7 +397,7 @@ export default function Reference() {
         </aside>
       </section>
 
-      <section className="reference-section" id="lifecycle">
+      <section className="reference-section" id="lifecycle" tabIndex={-1}>
         <div className="reference-section__heading">
           <p className="reference-kicker">03 · Ownership and lifecycle</p>
           <h2>QDN ownership is name-based</h2>
@@ -442,27 +448,27 @@ export default function Reference() {
         </div>
       </section>
 
-      <section className="reference-section" id="metadata">
+      <section className="reference-section" id="metadata" tabIndex={-1}>
         <div className="reference-section__heading">
           <p className="reference-kicker">04 · QDN metadata</p>
           <h2>Payload data and search metadata are separate</h2>
           <p>
-            The complete title and body live in <code>feedback.json</code>. Metadata is a compact discovery layer and
+            The complete title and body live in <code>{FEEDBACK_FILE_NAME}</code>. Metadata is a compact discovery layer and
             is capped by Core.
           </p>
         </div>
 
         <div className="reference-limits" role="list">
           <div className="reference-limit" role="listitem">
-            <strong>80</strong>
+            <strong>{FEEDBACK_METADATA_TITLE_BYTES}</strong>
             <span>UTF-8 bytes for title</span>
           </div>
           <div className="reference-limit" role="listitem">
-            <strong>240</strong>
+            <strong>{FEEDBACK_METADATA_DESCRIPTION_BYTES}</strong>
             <span>UTF-8 bytes for description</span>
           </div>
           <div className="reference-limit" role="listitem">
-            <strong>5</strong>
+            <strong>{FEEDBACK_METADATA_TAG_LIMIT}</strong>
             <span>tags, up to 20 characters each</span>
           </div>
         </div>
@@ -476,7 +482,7 @@ export default function Reference() {
         </div>
       </section>
 
-      <section className="reference-section" id="bridge">
+      <section className="reference-section" id="bridge" tabIndex={-1}>
         <div className="reference-section__heading">
           <p className="reference-kicker">05 · Qortium Home bridge</p>
           <h2>Detect capabilities before showing controls</h2>
@@ -524,7 +530,9 @@ export default function Reference() {
           <ReferenceCard title="Reply notifications">
             <ul>
               <li>
-                Feature-detect all four durable notification actions before showing follow controls.
+                Feature-detect all four durable notification producer actions before showing follow controls.
+                When Home does not advertise the complete producer contract, follow controls remain unavailable.
+                Notification manager actions are not substitutes. Help permits at most {HELP_NOTIFICATION_RULE_LIMIT} followed posts.
               </li>
               <li>
                 One <code>RESOURCE_PUBLISHED</code> rule follows one post through reply metadata; use a stable,
@@ -577,7 +585,7 @@ export default function Reference() {
         </aside>
       </section>
 
-      <section className="reference-section" id="avatars">
+      <section className="reference-section" id="avatars" tabIndex={-1}>
         <div className="reference-section__heading">
           <p className="reference-kicker">06 · Account and group avatars</p>
           <h2>Use the pointer-aware bridge, not a named thumbnail URL</h2>
@@ -638,7 +646,7 @@ export default function Reference() {
         </aside>
       </section>
 
-      <section className="reference-section" id="examples">
+      <section className="reference-section" id="examples" tabIndex={-1}>
         <div className="reference-section__heading">
           <p className="reference-kicker">07 · Copyable examples</p>
           <h2>Publish, discover, fetch, and delete</h2>

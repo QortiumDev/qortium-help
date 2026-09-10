@@ -1,6 +1,6 @@
 {
   "name": "qortium-help",
-  "version": "1.4.9",
+  "version": "1.4.10",
   "private": true,
   "license": "0BSD",
   "description": "A QDN help and feedback app for Qortium Home.",

@@ -10,11 +10,14 @@ export const FEEDBACK_SCHEMA = 'qortium.help.feedback.v1';
 export const FEEDBACK_POST_PREFIX = 'qhelp.feedback.v1.p.';
 export const FEEDBACK_COMMENT_PREFIX = 'qhelp.feedback.v1.c.';
 export const FEEDBACK_TAGS = ['qortium-help', 'feedback', 'v1'];
-const FEEDBACK_SERVICE = 'JSON';
-const FEEDBACK_FILE_NAME = 'feedback.json';
-const MAX_FEEDBACK_RESOURCE_BYTES = 200_000;
+export const FEEDBACK_SERVICE = 'JSON';
+export const FEEDBACK_FILE_NAME = 'feedback.json';
+export const MAX_FEEDBACK_RESOURCE_BYTES = 200_000;
 export const FEEDBACK_POST_PAGE_SIZE = 40;
 export const FEEDBACK_COMMENT_PAGE_SIZE = 80;
+export const FEEDBACK_METADATA_TITLE_BYTES = 80;
+export const FEEDBACK_METADATA_DESCRIPTION_BYTES = 240;
+export const FEEDBACK_METADATA_TAG_LIMIT = 5;
 
 export type FeedbackKind = 'idea' | 'issue';
 export type FeedbackStatus = 'done' | 'open';
@@ -253,7 +256,7 @@ function normalizeAttachments(value: unknown) {
     : [];
 }
 
-function normalizePayload(value: unknown): FeedbackPayload | null {
+export function normalizeFeedbackPayload(value: unknown): FeedbackPayload | null {
   if (!isRecord(value) || value.schema !== FEEDBACK_SCHEMA) {
     return null;
   }
@@ -332,7 +335,7 @@ async function fetchPayload(resource: QdnResource) {
     service: resource.service,
   });
 
-  return normalizePayload(parseQdnJson(value));
+  return normalizeFeedbackPayload(parseQdnJson(value));
 }
 
 async function fetchFeedbackResource<T extends FeedbackPayload>(
@@ -857,8 +860,8 @@ export async function publishFeedbackPayload(name: string, payload: FeedbackPayl
   // Qortium metadata caps the title at 80 bytes and the description at 240
   // (ArbitraryDataTransactionMetadata). Core silently truncates, but cap here for
   // consistency with the description cap below; the full title stays in the payload.
-  const title = truncateUtf8(payload.kind === 'post' ? payload.title : `Reply ${payload.postId}`, 80);
-  const description = truncateUtf8(payload.body, 240);
+  const title = truncateUtf8(payload.kind === 'post' ? payload.title : `Reply ${payload.postId}`, FEEDBACK_METADATA_TITLE_BYTES);
+  const description = truncateUtf8(payload.body, FEEDBACK_METADATA_DESCRIPTION_BYTES);
   const identifier =
     payload.kind === 'post' ? buildPostIdentifier(payload.id) : buildCommentIdentifier(payload.id);
 
@@ -870,7 +873,7 @@ export async function publishFeedbackPayload(name: string, payload: FeedbackPayl
     identifier,
     name,
     service: FEEDBACK_SERVICE,
-    tags: [...FEEDBACK_TAGS, payload.kind, payload.kind === 'post' ? payload.type : 'reply'].slice(0, 5),
+    tags: [...FEEDBACK_TAGS, payload.kind, payload.kind === 'post' ? payload.type : 'reply'].slice(0, FEEDBACK_METADATA_TAG_LIMIT),
     title,
   });
 }

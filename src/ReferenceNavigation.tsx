@@ -19,7 +19,16 @@ function scrollSection() {
   const id = window.location.hash.slice(1);
   if (!REFERENCE_SECTIONS.some(([section]) => section === id)) return;
   const section = document.getElementById(id);
-  const container = section?.closest<HTMLElement>('.main-panel');
+  const shell = section?.closest<HTMLElement>('.app-shell');
+  let container = section?.parentElement;
+  // Narrow layouts scroll .workspace; wide layouts scroll .main-panel.
+  // Stop at Help's shell so section navigation cannot move the Home document.
+  while (container && container !== shell) {
+    if (/(auto|scroll)/.test(getComputedStyle(container).overflowY)
+      && container.scrollHeight > container.clientHeight) break;
+    container = container.parentElement;
+  }
+  if (container === shell) return;
   if (section && container) {
     // Never scroll Home's outer Android document via scrollIntoView.
     container.scrollTop += section.getBoundingClientRect().top - container.getBoundingClientRect().top;

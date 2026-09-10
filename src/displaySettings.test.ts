@@ -309,3 +309,12 @@ describe('applyDisplaySettings', () => {
     expect(root.dataset.ui).toBe('modern');
   });
 });
+
+
+it('accepts Home clay accent in initial settings and live changes', () => {
+  vi.stubGlobal('window', { location: { search: '?accent=clay' } });
+  try {
+    expect(getInitialDisplaySettings().accent).toBe('clay');
+    expect(getDisplaySettingsUpdateFromMessage({ action: 'ACCENT_CHANGED', accent: 'clay' }, current)?.accent).toBe('clay');
+  } finally { vi.unstubAllGlobals(); }
+});

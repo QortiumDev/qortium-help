@@ -5,6 +5,9 @@ import type { QdnAction } from './types';
 
 export const HELP_NOTIFICATION_ID_PREFIX = 'help.reply.';
 export const HELP_NOTIFICATION_RULE_LIMIT = 20;
+export const HELP_NOTIFICATION_ACTIONS = [
+  'NOTIFICATION_HAS_PERMISSION', 'NOTIFICATION_ADD', 'NOTIFICATION_GET', 'NOTIFICATION_REMOVE',
+] as const;
 
 export type HelpNotificationCopy = {
   text: string;
@@ -51,12 +54,7 @@ function getPostIdFromLink(link: string) {
 export function canManageHelpNotifications(actions: QdnAction[]) {
   const supported = new Set(actions.map((action) => action.toUpperCase()));
 
-  return [
-    'NOTIFICATION_HAS_PERMISSION',
-    'NOTIFICATION_ADD',
-    'NOTIFICATION_GET',
-    'NOTIFICATION_REMOVE',
-  ].every((action) => supported.has(action));
+  return HELP_NOTIFICATION_ACTIONS.every((action) => supported.has(action));
 }
 
 export function hasHelpNotificationCapacity(rules: HelpNotificationRule[]) {

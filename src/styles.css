@@ -2624,3 +2624,18 @@ textarea:focus-visible {
     transform: none;
   }
 }
+
+/* Home clay uses the same display tokens in every workspace. */
+:root[data-accent='clay'] {
+  --qh-accent: #b5652d; --qh-accent-hover: #c47742; --qh-accent-text: #1e1400;
+  --qh-accent-soft: rgb(181 101 45 / 10%); --qh-accent-ring: rgb(181 101 45 / 18%);
+  --qh-gradient-primary: linear-gradient(180deg, #c47742, #b5652d);
+}
+:root[data-theme='dark'][data-accent='clay'] {
+  --qh-accent: #e3b48f; --qh-accent-hover: #edc7a8; --qh-accent-text: #2b1608;
+  --qh-accent-soft: rgb(227 180 143 / 14%); --qh-accent-ring: rgb(227 180 143 / 20%);
+  --qh-gradient-primary: linear-gradient(180deg, #edc7a8, #e3b48f);
+}
+.reference-copy-status { margin: 0; padding: 8px 12px; min-height: 1.5em; font-size: var(--qh-text-small); overflow-wrap: anywhere; }
+.reference-code__copy { min-height: 44px; }
+.reference-section:focus-visible, .reference-code pre:focus-visible { outline: 2px solid var(--qh-accent); outline-offset: -2px; }
